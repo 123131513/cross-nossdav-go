@@ -126,7 +126,7 @@ type AdaptationSet struct {
 	BitstreamSwitching bool     `xml:"bitstreamSwitching,attr"`
 	MaxWidth           int      `xml:"maxWidth,attr"`
 	MaxHeight          int      `xml:"maxHeight"`
-	MaxFrameRate       int      `xml:"maxFrameRate"`
+	MaxFrameRate       string   `xml:"maxFrameRate,attr"`
 
 	Par string `xml:"par,attr"`
 
@@ -142,7 +142,7 @@ type AdaptationSet struct {
 	MimeType                  string                    `xml:"mimeType,attr"`
 	StartWithSAP              int                       `xml:"startWithSAP,attr"`
 
-	FrameRate int    `xml:"frameRate,attr"`
+	FrameRate string `xml:"frameRate,attr"`
 	Height    string `xml:"height,attr"`
 	ScanType  string `xml:"scanType,attr"`
 	Width     int    `xml:"width,attr"`
@@ -156,7 +156,7 @@ type Representation struct {
 	Codecs                    string                    `xml:"codecs,attr"`
 	Width                     int                       `xml:"width,attr"`
 	Height                    int                       `xml:"height,attr"`
-	FrameRate                 int                       `xml:"frameRate,attr"`
+	FrameRate                 string                    `xml:"frameRate,attr"`
 	Sar                       string                    `xml:"sar,attr"`
 	StartWithSap              int                       `xml:"startWithSap,attr"`
 	BandWidth                 int                       `xml:"bandwidth,attr"`
@@ -264,23 +264,33 @@ func getStructList(requestedURLs []string, debugFile string, debugLog bool, useT
 *
  */
 func fileParser(mpdBody []byte) MPD {
+	var mpd MPD
 
-	var mpd *MPD
+	if len(mpdBody) == 0 {
+		log.Println("empty MPD body received")
+		return mpd
+	}
 
 	//extract everything from the file read in bytes to the structures
-	xml.Unmarshal(mpdBody, &mpd)
+	if err := xml.Unmarshal(mpdBody, &mpd); err != nil {
+		log.Println("unable to parse MPD:", err)
+		preview := string(mpdBody)
+		if len(preview) > 400 {
+			preview = preview[:400]
+		}
+		log.Println("MPD preview:", preview)
+		return mpd
+	}
 
-	for _, period := range mpd.Periods {
-		for _, adapt := range period.AdaptationSet {
-			sort.SliceStable(adapt.Representation, func(i, j int) bool {
-				return adapt.Representation[i].BandWidth < adapt.Representation[j].BandWidth
+	for periodIndex := range mpd.Periods {
+		for adaptIndex := range mpd.Periods[periodIndex].AdaptationSet {
+			sort.SliceStable(mpd.Periods[periodIndex].AdaptationSet[adaptIndex].Representation, func(i, j int) bool {
+				return mpd.Periods[periodIndex].AdaptationSet[adaptIndex].Representation[i].BandWidth < mpd.Periods[periodIndex].AdaptationSet[adaptIndex].Representation[j].BandWidth
 			})
 		}
 	}
 
-	//fmt.Println(mpd.Periods[0].AdaptationSet[0].Representation[0].Chunks)
-
-	return *mpd
+	return mpd
 }
 
 // func getSegmentSizes() {
@@ -838,8 +848,19 @@ func GetCodec(mpdList []MPD, codec string, debugLog bool) ([][]string, [][]int, 
 		var codecList []string
 		var codecIndexList []int
 
+		if len(mpdList[i].Periods) == 0 {
+			logging.DebugPrint(glob.DebugFile, debugLog, "DEBUG: ", "MPD "+strconv.Itoa(i+1)+" has no Period entries")
+			tempCodecList = append(tempCodecList, codecList)
+			tempIndexList = append(tempIndexList, codecIndexList)
+			continue
+		}
+
 		// loop over adaptation sets
 		for j := 0; j < len(mpdList[i].Periods[0].AdaptationSet); j++ {
+			if len(mpdList[i].Periods[0].AdaptationSet[j].Representation) == 0 {
+				logging.DebugPrint(glob.DebugFile, debugLog, "DEBUG: ", "MPD "+strconv.Itoa(i+1)+" adaptation set "+strconv.Itoa(j)+" has no Representation entries")
+				continue
+			}
 
 			// check the current codec
 			mpdCodec := mpdList[i].Periods[0].AdaptationSet[j].Representation[0].Codecs
@@ -1113,60 +1134,44 @@ func GetSegmentDetails(mpd []MPD, mpdListIndex int, adaptationSetIndex ...int) (
 // SplitMPDSegmentDuration :
 // get the per second details from the MPD segments
 func SplitMPDSegmentDuration(mpdSegDuration string) int {
-
 	var totalTimeinSeconds int
-	var streamDuration string
+	streamDuration := strings.TrimPrefix(mpdSegDuration, "PT")
 
-	// lets first determine the length of the file
-	// remove the "PT"
-	streamDurationHMS := strings.Replace(mpdSegDuration, "PT", "", -1)
-
-	// if streamDurationHMS contains hours
-	if strings.Contains(streamDurationHMS, "H") {
-		// get the hours
-		H := strings.Split(streamDurationHMS, "H")
-		streamDurationH := H[0]
-		// if there are hours, convert to seconds
-		i3, err := strconv.Atoi(streamDurationH)
+	if strings.Contains(streamDuration, "H") {
+		parts := strings.SplitN(streamDuration, "H", 2)
+		hours, err := strconv.Atoi(parts[0])
 		if err != nil {
 			fmt.Println("*** Problem with converting segment hours to int ***")
-			// stop the app
 			utils.StopApp()
 		}
-		if i3 > 0 {
-			totalTimeinSeconds = i3 * 60 * 60
+		totalTimeinSeconds += hours * 60 * 60
+		streamDuration = parts[1]
+	}
+
+	if strings.Contains(streamDuration, "M") {
+		parts := strings.SplitN(streamDuration, "M", 2)
+		minutes, err := strconv.Atoi(parts[0])
+		if err != nil {
+			fmt.Println("*** Problem with converting segment minutes to int ***")
+			utils.StopApp()
 		}
-		streamDuration = H[1]
-	} else {
-
-		// remove the "PT0H"
-		streamDuration = strings.Replace(mpdSegDuration, "PT0H", "", -1)
+		totalTimeinSeconds += minutes * 60
+		streamDuration = parts[1]
 	}
 
-	// split around the Minutes
-	s := strings.Split(streamDuration, "M")
-
-	// if there are minutes, convert to seconds
-	i1, err := strconv.Atoi(s[0])
-	if err != nil {
-		fmt.Println("*** Problem with converting segment minutes to int ***")
-		// stop the app
-		utils.StopApp()
-	}
-	if i1 > 0 {
-		totalTimeinSeconds = i1 * 60
+	streamDuration = strings.TrimSuffix(streamDuration, "S")
+	if streamDuration == "" {
+		return totalTimeinSeconds
 	}
 
-	// get the seconds and convert to int
-	s = strings.Split(s[1], "S")
-	s = strings.Split(s[0], ".")
-	i2, err := strconv.Atoi(s[0])
+	secondsPart := strings.SplitN(streamDuration, ".", 2)[0]
+	seconds, err := strconv.Atoi(secondsPart)
 	if err != nil {
 		fmt.Println("*** Problem with converting segment seconds to int ***")
+		utils.StopApp()
 	}
 
-	// return the minutes and seconds (in seconds)
-	return totalTimeinSeconds + i2
+	return totalTimeinSeconds + seconds
 }
 
 // URLList :

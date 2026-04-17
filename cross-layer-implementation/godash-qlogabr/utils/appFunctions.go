@@ -151,6 +151,15 @@ func GetChunk(chunkList string, pos int) int {
 	// Segments start at 1, but list index starts at 0. Offset the pos
 	pos = pos - 1
 	chunkListSplit := strings.Split(chunkList, ",")
+	if len(chunkListSplit) == 0 || chunkListSplit[0] == "" {
+		return 0
+	}
+	if pos < 0 {
+		pos = 0
+	}
+	if pos >= len(chunkListSplit) {
+		pos = len(chunkListSplit) - 1
+	}
 	val, err := strconv.Atoi(chunkListSplit[pos])
 	if err != nil {
 		fmt.Println(err)

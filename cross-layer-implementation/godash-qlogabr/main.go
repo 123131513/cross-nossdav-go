@@ -347,11 +347,16 @@ func main() {
 
 			// save the current MPD Rep_rate Adaptation Set
 			// check if the codec is in the MPD urls passed in
-			var codecList [][]string
-			var codecIndexList [][]int
-			codecList, codecIndexList, audioContent = http.GetCodec(structList, *codecPtr, debugLog)
+				var codecList [][]string
+				var codecIndexList [][]int
+				codecList, codecIndexList, audioContent = http.GetCodec(structList, *codecPtr, debugLog)
 
-			logging.DebugPrint(glob.DebugFile, debugLog, "DEBUG: ", "Audio content is set to "+strconv.FormatBool(audioContent))
+				if len(codecList) == 0 || len(codecList[0]) == 0 {
+					fmt.Println("\n*** Unable to determine codec information from the provided MPD. Please verify the MPD structure and codec fields. ***")
+					utils.StopApp()
+				}
+
+				logging.DebugPrint(glob.DebugFile, debugLog, "DEBUG: ", "Audio content is set to "+strconv.FormatBool(audioContent))
 			// determine if the passed in codec is one of the codecs we use (checking the first MPD only)
 			usedVideoCodec, codecIndex := utils.FindInStringArray(codecList[0], *codecPtr)
 			// check the codec and print error is false

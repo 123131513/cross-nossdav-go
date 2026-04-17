@@ -177,6 +177,31 @@ var mimeTypesMediaType []abrqlog.MediaType
 var streamStructs []http.StreamStruct
 var BBA2DataStruct algo.BBA2Data
 
+func parseFrameRate(frameRate string) int {
+	if frameRate == "" {
+		return 0
+	}
+
+	if strings.Contains(frameRate, "/") {
+		parts := strings.SplitN(frameRate, "/", 2)
+		if len(parts) != 2 {
+			return 0
+		}
+		numerator, errNum := strconv.Atoi(parts[0])
+		denominator, errDen := strconv.Atoi(parts[1])
+		if errNum != nil || errDen != nil || denominator == 0 {
+			return 0
+		}
+		return numerator / denominator
+	}
+
+	fps, err := strconv.Atoi(frameRate)
+	if err != nil {
+		return 0
+	}
+	return fps
+}
+
 // Stream :
 /*
  * get the header file for the current video clip
@@ -1165,7 +1190,7 @@ func streamLoop(streamStructs []http.StreamStruct, Noden P2Pconsul.NodeUrl, acco
 			// get rep_rate height, width and frames per second
 			repHeight = mpdList[mpdListIndex].Periods[0].AdaptationSet[mimeTypes[mimeTypeIndex]].Representation[repRate].Height
 			repWidth = mpdList[mpdListIndex].Periods[0].AdaptationSet[mimeTypes[mimeTypeIndex]].Representation[repRate].Width
-			repFps = mpdList[mpdListIndex].Periods[0].AdaptationSet[mimeTypes[mimeTypeIndex]].Representation[repRate].FrameRate
+			repFps = parseFrameRate(mpdList[mpdListIndex].Periods[0].AdaptationSet[mimeTypes[mimeTypeIndex]].Representation[repRate].FrameRate)
 		}
 
 		// calculate the throughtput (we get the segSize while downloading the file)
