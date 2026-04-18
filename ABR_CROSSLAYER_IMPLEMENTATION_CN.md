@@ -49,6 +49,7 @@
 - `bba2XL-double`
 - `averageXL`
 - `averageRecentXL`
+- `pensieve`
 
 这些名字是运行时切换算法的真实标识。
 
@@ -74,6 +75,12 @@
 
 所以如果你们后续要真的用这个算法，首先要修 `main.go`。
 
+补充说明：
+
+- `pensieve` 已经被加入 `main.go` 的算法白名单
+- 它不属于论文原始 BBA2 / Cross-layer 主线，而是后续新增的“外部 ABR 服务”模式
+- 它依赖 `paper-utilities/pensieve` 子模块中的官方 `rl_server/rl_server_no_training.py`
+
 ---
 
 ## 2.2 程序启动时，跨层对象如何接入
@@ -97,6 +104,13 @@
    `http.SetAccountant(accountant)`
 
 也就是说，`CrossLayerAccountant` 是上层 GoDASH 的跨层核心对象；它持有一个通道，后续 QUIC qlog 事件会被写进来。
+
+这里要区分两类算法：
+
+- 论文主线跨层算法
+  直接依赖 `CrossLayerAccountant` 的吞吐统计、stall predictor 和 abort 逻辑
+- `pensieve`
+  仍然走 GoDASH 主下载流程，但策略决策通过 HTTP 请求交给外部 Pensieve 服务，当前并不使用 `CrossLayerAccountant` 的预测器输出
 
 ---
 
@@ -235,6 +249,12 @@
 - 调用 `http.GetFile(...)` 下载
 - 在下载完成后调用具体算法函数决定下一段表示
 
+另外，当前 `player.go` 还承担了 `pensieve` 接线工作：
+
+- 在 `adapt == pensieve` 时创建 `PensieveExternalClient`
+- 在每个分片下载完成后调用外部 `rl_server`
+- 将服务返回的动作索引映射回本地表示索引
+
 ### 2.5.1 初始化预测器
 
 在 `Stream(...)` 中：
@@ -257,6 +277,75 @@
   会额外预测“如果当前段勉强完成，下一段低一档还能否及时到达”
 
 注意：当前 `stallPredictor()` 里明显使用了 `Double` 的额外判断；`Rate` 在这里没有像 `Double` 一样体现出单独分支，因此它更像一个预留或未完全展开的变体。
+
+### 2.5.2 Pensieve 分支是怎么接进去的
+
+### 关键文件
+
+- `cross-layer-implementation/godash-qlogabr/player/player.go`
+- `cross-layer-implementation/godash-qlogabr/algorithms/pensieve_external.go`
+- `paper-utilities/pensieve/rl_server/rl_server_no_training.py`
+
+### 调用链
+
+当前 `pensieve` 模式的链路是：
+
+1. `main.go`
+   解析 `-adapt pensieve` 和 `-pensieveServer`
+2. `player.Stream(...)`
+   在流开始时创建 `PensieveExternalClient`
+3. `streamLoop(...)`
+   每个分片完成后调用 `PensieveClient.SelectBitrate(...)`
+4. `pensieve_external.go`
+   向外部 `rl_server` 发送 HTTP 请求
+5. `rl_server_no_training.py`
+   返回 `0..5` 动作，尾段时返回 `REFRESH`
+
+### 当前兼容层实际做了什么
+
+`pensieve_external.go` 当前只做三件事：
+
+1. 码率映射
+   把 GoDASH 本地表示索引按码率升序映射为官方 Pensieve 的 `0..5`
+2. 请求封装
+   按官方 `rl_server_no_training.py` 使用的字段发送：
+   - `lastquality`
+   - `buffer`
+   - `RebufferTime`
+   - `lastChunkStartTime`
+   - `lastChunkFinishTime`
+   - `lastChunkSize`
+   - `lastRequest`
+3. 返回处理
+   解析服务返回动作；如果收到 `REFRESH`，则保持当前表示索引
+
+### 这个分支的严格限制
+
+当前 `pensieve` 分支有两个硬约束：
+
+1. 当前 `AdaptationSet` 必须恰好有 6 个表示
+2. 六档码率升序后必须正好是：
+   - `300`
+   - `750`
+   - `1200`
+   - `1850`
+   - `2850`
+   - `4300` Kbps
+
+如果不满足这两个条件，当前实现不会继续把它当作“官方 Pensieve 一致接入”使用。
+
+### 运行层面的外部限制
+
+虽然 `pensieve` 的 Go 侧接线已经完成，但当前子模块里的官方服务还受这些外部条件限制：
+
+1. `rl_server_no_training.py` 是 Python 2 语法
+2. 依赖 TensorFlow 1.x / TFLearn 老环境
+3. 当前机器若只有 `python3` 且没有 `tensorflow`，服务无法直接启动
+
+因此这里要明确区分：
+
+- Go 侧接线已经在仓库中
+- 服务端能否真正运行，取决于 Pensieve 子模块环境是否满足官方旧依赖
 
 ### 2.5.2 每段下载前的分支
 

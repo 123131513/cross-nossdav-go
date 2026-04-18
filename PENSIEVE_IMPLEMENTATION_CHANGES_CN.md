@@ -1,6 +1,6 @@
 # Pensieve 子模块接入与播放器运行说明
 
-本文档说明本次如何把 `Pensieve` 作为官方代码子模块接入当前仓库，以及如何在当前 `GoDASH` 播放器中运行它。
+本文档说明本次如何把 `Pensieve` 作为官方代码子模块接入当前仓库、当前实际可运行边界是什么，以及满足条件后如何在 `GoDASH` 播放器中调用它。
 
 ## 1. 这次调整的原则
 
@@ -17,6 +17,13 @@
 - 避免在本仓库中重复维护一份 Pensieve 服务代码
 - 尽量保持与官方 `hongzimao/pensieve` 实现一致
 - 后续如果你们在 Pensieve fork 中修正模型路径、环境依赖或实验脚本，当前仓库只需要更新子模块指针
+
+需要先说明当前状态：
+
+- Go 侧兼容层已经接入仓库
+- 子模块中的官方 checkpoint 文件也已经存在
+- 但当前机器只有 `python3`，没有 `python2`，也没有 `tensorflow`
+- 因此官方 `rl_server_no_training.py` 目前在这台机器上不能直接启动
 
 ## 2. 新增的子模块
 
@@ -144,6 +151,17 @@ python rl_server_no_training.py
 
 默认监听端口是 `8333`。
 
+这一步的真实前提是：
+
+- `python` 必须指向可运行 Python 2 语法的解释器
+- 环境中必须安装官方所需的 TensorFlow 1.x / TFLearn
+
+如果像当前机器这样只有 `python3`，直接执行会报：
+
+```text
+SyntaxError: Missing parentheses in call to 'print'
+```
+
 注意：
 
 - 官方 `rl_server_no_training.py` 没有单独的 `/reset` API
@@ -217,6 +235,11 @@ go run . -adapt pensieve -pensieveServer http://127.0.0.1:8333 ...
 
 - 当前播放器在复用官方 Pensieve 服务代码路径
 - 但实验条件未必与论文原始服务假设完全等价
+
+如果环境本身还不满足 Python 2 / TensorFlow 1.x 依赖，则当前状态只能进一步表述为：
+
+- 仓库结构和调用边界已经对齐官方 Pensieve
+- 但服务端还没有在当前机器上成功运行
 
 ## 9. 后续维护方式
 

@@ -4,24 +4,16 @@
 
 ## 1. 项目定位
 
-这是 NOSSDAV 2023 论文《Cross that boundary: Investigating the feasibility of cross-layer information sharing for enhancing ABR decision logic over QUIC》的复现实验仓库。仓库主体由四部分组成：
+这是 NOSSDAV 2023 论文《Cross that boundary: Investigating the feasibility of cross-layer information sharing for enhancing ABR decision logic over QUIC》的复现实验仓库。当前仓库主体由四部分组成：
 
 1. `cross-layer-implementation/`
    包含论文定制的 GoDASH 客户端和 quic-go 实现，是核心源码。
 2. `tc-netem-shaper/`
    包含网络仿真与整形容器，用 `tc netem` 复现实验中的带宽变化。
 3. `paper-utilities/`
-   包含 Vegvisir 环境脚本、MPD 转换脚本、图表生成脚本和结果浏览页面。
+   包含 Vegvisir 环境脚本、MPD 转换脚本、图表生成脚本，以及后来接入的 `pensieve` 子模块。
 4. `paper-logs/`
    包含论文实验产物，主要是客户端日志、qlog、QoE 结果、图表和整形器日志。
-
-按当前仓库统计：
-
-- 顶层普通文件数：`README.md`、`LICENSE.md`、`.gitignore` 等少量元数据文件
-- `cross-layer-implementation/` 文件数约 `521`
-- `paper-logs/` 文件数约 `1550`
-- `paper-utilities/` 文件数约 `8`
-- `tc-netem-shaper/` 文件数约 `5`
 
 ## 2. 顶层结构
 
@@ -30,6 +22,11 @@
 ├── README.md
 ├── LICENSE.md
 ├── .gitignore
+├── .gitmodules
+├── ABR_CROSSLAYER_IMPLEMENTATION_CN.md
+├── PENSIEVE_IMPLEMENTATION_CHANGES_CN.md
+├── PENSIEVE_REPRODUCTION_PLAN_CN.md
+├── PROJECT_STRUCTURE_CN.md
 ├── cross-layer-implementation/
 ├── paper-logs/
 ├── paper-utilities/
@@ -44,8 +41,16 @@
   仓库整体许可证文本。
 - `.gitignore`
   Git 忽略规则。
-- `.codex`
-  当前工作环境中的占位文件，不属于论文主体内容。
+- `.gitmodules`
+  Git 子模块定义文件。当前主要用于记录 `paper-utilities/pensieve` 的远程地址。
+- `ABR_CROSSLAYER_IMPLEMENTATION_CN.md`
+  说明 `godash-qlogabr` 与 `quic-go` 中 ABR 和跨层通信的实现链路。
+- `PENSIEVE_IMPLEMENTATION_CHANGES_CN.md`
+  说明当前仓库如何通过 `pensieve` 子模块对接官方 `rl_server`。
+- `PENSIEVE_REPRODUCTION_PLAN_CN.md`
+  说明为什么 Pensieve 复现方案调整为“子模块 + 播放器侧兼容层”。
+- `PROJECT_STRUCTURE_CN.md`
+  本文档自身。
 
 ## 3. `cross-layer-implementation/`：核心实现
 
@@ -131,6 +136,8 @@ cross-layer-implementation/
   Logistic 型算法。
 - `helperFunctions.go`
   算法间共用辅助函数。
+- `pensieve_external.go`
+  当前仓库新增的 Pensieve 外部客户端兼容层。它不实现策略本身，只负责把 GoDASH 当前状态转成官方 `rl_server` 可接收的请求，并把返回的动作索引映射回本地表示索引。
 - `average_test.go`
   平均吞吐算法的单元测试。
 
@@ -471,6 +478,7 @@ paper-utilities/
 ├── segmentGraph.py
 ├── visualize_ouput.html
 ├── Visualizations/
+├── pensieve/
 ├── vegvisir-configurations/
 └── vegvisir-scripts/
 ```
@@ -483,6 +491,23 @@ paper-utilities/
   从 `metrics_log.txt` 和 `shaper_metrics.txt` 读取时间序列，绘制缓冲区、码率选择、模拟吞吐、stall predictor 触发点等图形。
 - `visualize_ouput.html`
   一个静态 HTML 浏览页，用于批量显示各实验目录中的 `viz_stallprediction.png` 和 `itu-p1203.json` 分数。
+
+### `pensieve/`
+
+- 这是后续加入的 Git 子模块，远程位于 `https://github.com/123131513/pensieve`。
+- 目录内容基本保持官方 `hongzimao/pensieve` 结构，包含：
+  - `rl_server/`
+    官方在线推理服务脚本与预训练 checkpoint
+  - `sim/`
+    模拟训练与测试脚本
+  - `test/`
+    离线评测脚本
+  - `real_exp/`、`run_exp/`
+    官方实验驱动脚本
+- 当前仓库不再维护 `pensieve_service.py` 副本，而是通过 `cross-layer-implementation/godash-qlogabr/algorithms/pensieve_external.go` 与这个子模块中的 `rl_server/rl_server_no_training.py` 对接。
+- 需要注意：
+  - 该子模块中的 `rl_server_no_training.py` 是旧版 Python 2 / TensorFlow 1.x 代码
+  - 当前机器若只有 `python3`，不能直接运行它
 
 ### `vegvisir-scripts/`
 
