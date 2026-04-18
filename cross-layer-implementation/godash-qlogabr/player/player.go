@@ -176,6 +176,7 @@ var mimeTypesMediaType []abrqlog.MediaType
 
 var streamStructs []http.StreamStruct
 var BBA2DataStruct algo.BBA2Data
+var PensieveClient *algo.PensieveExternalClient
 
 func parseFrameRate(frameRate string) int {
 	if frameRate == "" {
@@ -208,7 +209,7 @@ func parseFrameRate(frameRate string) int {
  * check the different arguments in order to stream
  * call streamLoop to begin to stream
  */
-func Stream(mpdList []http.MPD, debugFile string, debugLog bool, codec string, codecName string, maxHeight int, streamDuration int, streamSpeed float64, maxBuffer int, initBuffer int, adapt string, urlString string, fileDownloadLocationIn string, extendPrintLog bool, hls string, hlsBool bool, quic string, quicBool bool, getHeaderBool bool, getHeaderReadFromFile string, exponentialRatioIn float64, printHeadersDataIn map[string]string, printLogIn bool,
+func Stream(mpdList []http.MPD, debugFile string, debugLog bool, codec string, codecName string, maxHeight int, streamDuration int, streamSpeed float64, maxBuffer int, initBuffer int, adapt string, pensieveServer string, urlString string, fileDownloadLocationIn string, extendPrintLog bool, hls string, hlsBool bool, quic string, quicBool bool, getHeaderBool bool, getHeaderReadFromFile string, exponentialRatioIn float64, printHeadersDataIn map[string]string, printLogIn bool,
 	useTestbedBoolIn bool, getQoEBoolIn bool, saveFilesBoolIn bool, Noden P2Pconsul.NodeUrl, accountant *xlayer.CrossLayerAccountant) {
 
 	// set debug logs for the collab clients
@@ -448,6 +449,10 @@ func Stream(mpdList []http.MPD, debugFile string, debugLog bool, codec string, c
 			case glob.MeanAverageRecentXLAlg:
 				http.GetFile(currentURL, baseJoined, fileDownloadLocation, false, startRange, endRange, segmentNumber,
 					segmentDuration, true, quicBool, debugFile, debugLog, useTestbedBool, repRate, saveFilesBool, AudioByteRange, profile, currentMediaType, ctx2)
+			case glob.PensieveAlg:
+				http.GetFile(currentURL, baseJoined, fileDownloadLocation, false, startRange, endRange, segmentNumber,
+					segmentDuration, true, quicBool, debugFile, debugLog, useTestbedBool, repRate, saveFilesBool, AudioByteRange, profile, currentMediaType, ctx2)
+				repRate = l_lowestMPDrepRateIndex
 			case glob.BBA1Alg_AV:
 				http.GetFile(currentURL, baseJoined, fileDownloadLocation, false, startRange, endRange, segmentNumber,
 					segmentDuration, true, quicBool, debugFile, debugLog, useTestbedBool, repRate, saveFilesBool, AudioByteRange, profile, currentMediaType, ctx2)
@@ -505,6 +510,18 @@ func Stream(mpdList []http.MPD, debugFile string, debugLog bool, codec string, c
 					}
 				}
 				BBA2DataStruct = algo.NewBBA2Data(chunksLowest, maxAvgRatioList, &metricsLogger)
+			}
+			if adapt == glob.PensieveAlg {
+				if len(mpdList[mpdListIndex].Periods[0].AdaptationSet[currentMPDRepAdaptSet].Representation) != 6 {
+					fmt.Printf("*** pensieve requires exactly 6 representations in the selected adaptation set, got %d ***\n",
+						len(mpdList[mpdListIndex].Periods[0].AdaptationSet[currentMPDRepAdaptSet].Representation))
+					os.Exit(3)
+				}
+				PensieveClient = algo.NewPensieveExternalClient(pensieveServer)
+				if err := PensieveClient.Reset(); err != nil {
+					fmt.Printf("*** failed to reset Pensieve service at %s: %v ***\n", pensieveServer, err)
+					os.Exit(3)
+				}
 			}
 
 			// debug logs
@@ -896,6 +913,8 @@ func streamLoop(streamStructs []http.StreamStruct, Noden P2Pconsul.NodeUrl, acco
 			accountant.StartTiming()
 		case glob.MeanAverageRecentXLAlg:
 			accountant.StartTiming()
+		case glob.PensieveAlg:
+			accountant.StartTiming()
 		case glob.BBA1Alg_AV:
 			accountant.StartTiming()
 		case glob.BBA1Alg_AVXL:
@@ -955,6 +974,8 @@ func streamLoop(streamStructs []http.StreamStruct, Noden P2Pconsul.NodeUrl, acco
 		case glob.MeanAverageXLAlg:
 			rtt, segSize, protocol, segmentFileName, P1203Header, status = http.GetFile(currentURL, baseJoined, fileDownloadLocation, isByteRangeMPD, startRange, endRange, segmentNumber, segmentDuration, true, quicBool, glob.DebugFile, debugLog, useTestbedBool, repRate, saveFilesBool, AudioByteRange, profile, mimeTypesMediaType[mimeTypeIndex], ctx)
 		case glob.MeanAverageRecentXLAlg:
+			rtt, segSize, protocol, segmentFileName, P1203Header, status = http.GetFile(currentURL, baseJoined, fileDownloadLocation, isByteRangeMPD, startRange, endRange, segmentNumber, segmentDuration, true, quicBool, glob.DebugFile, debugLog, useTestbedBool, repRate, saveFilesBool, AudioByteRange, profile, mimeTypesMediaType[mimeTypeIndex], ctx)
+		case glob.PensieveAlg:
 			rtt, segSize, protocol, segmentFileName, P1203Header, status = http.GetFile(currentURL, baseJoined, fileDownloadLocation, isByteRangeMPD, startRange, endRange, segmentNumber, segmentDuration, true, quicBool, glob.DebugFile, debugLog, useTestbedBool, repRate, saveFilesBool, AudioByteRange, profile, mimeTypesMediaType[mimeTypeIndex], ctx)
 		case glob.BBA1Alg_AV:
 			rtt, segSize, protocol, segmentFileName, P1203Header, status = http.GetFile(currentURL, baseJoined, fileDownloadLocation, isByteRangeMPD, startRange, endRange, segmentNumber, segmentDuration, true, quicBool, glob.DebugFile, debugLog, useTestbedBool, repRate, saveFilesBool, AudioByteRange, profile, mimeTypesMediaType[mimeTypeIndex], ctx)
@@ -1405,6 +1426,22 @@ func streamLoop(streamStructs []http.StreamStruct, Noden P2Pconsul.NodeUrl, acco
 		case glob.MeanAverageRecentXLAlg:
 			//fmt.Println("old: ", repRate)
 			algo.MeanAverageRecentXLAlgo(accountant, &thrList, thr, &repRate, bandwithList, lowestMPDrepRateIndex[mimeTypeIndex])
+		case glob.PensieveAlg:
+			var err error
+			repRate, err = PensieveClient.SelectBitrate(
+				bandwithList,
+				preRepRate,
+				bufferLevel,
+				stallTime,
+				segSize,
+				deliveryTime,
+				segmentNumber+1,
+				mpdList[mpdListIndex].Periods[0].AdaptationSet[mimeTypes[mimeTypeIndex]].Representation,
+			)
+			if err != nil {
+				fmt.Printf("*** pensieve service request failed: %v ***\n", err)
+				os.Exit(3)
+			}
 		case glob.BBA1Alg_AV:
 			repRate = algo.BBA(bufferLevel, maxBufferLevel, highestMPDrepRateIndex[mimeTypeIndex], lowestMPDrepRateIndex[mimeTypeIndex], bandwithList, segmentDuration*1000, debugLog, glob.DebugFile, &thrList, thr, preRepRate)
 		case glob.BBA1Alg_AVXL:

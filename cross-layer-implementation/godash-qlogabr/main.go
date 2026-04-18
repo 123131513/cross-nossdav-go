@@ -94,7 +94,7 @@ var Noden = P2Pconsul.NodeUrl{}
 
 // slices for our encoders, algorithms and HLS
 var codecSlice = []string{glob.RepRateCodecAVC, glob.RepRateCodecHEVC, glob.RepRateCodecVP9, glob.RepRateCodecAV1}
-var algorithmSlice = []string{glob.ConventionalAlg, glob.ElasticAlg, glob.LogisticAlg, glob.TestAlg, glob.ProgressiveAlg, glob.MeanAverageAlg, glob.GeomAverageAlg, glob.EMWAAverageAlg, glob.ArbiterAlg, glob.BBAAlg, glob.MeanAverageXLAlg, glob.MeanAverageRecentXLAlg, glob.BBA1Alg_AV, glob.BBA1Alg_AVXL, glob.BBA2Alg_AV, glob.BBA2Alg_AVXL_base, glob.BBA2Alg_AVXL_double}
+var algorithmSlice = []string{glob.ConventionalAlg, glob.ElasticAlg, glob.LogisticAlg, glob.TestAlg, glob.ProgressiveAlg, glob.MeanAverageAlg, glob.GeomAverageAlg, glob.EMWAAverageAlg, glob.ArbiterAlg, glob.BBAAlg, glob.MeanAverageXLAlg, glob.MeanAverageRecentXLAlg, glob.PensieveAlg, glob.BBA1Alg_AV, glob.BBA1Alg_AVXL, glob.BBA2Alg_AV, glob.BBA2Alg_AVXL_base, glob.BBA2Alg_AVXL_double}
 var hlsSlice = []string{glob.HlsOff, glob.HlsOn}
 var storeFilesSlice = []string{glob.StoreFilesOff, glob.StoreFilesOn}
 
@@ -135,7 +135,8 @@ func main() {
 	streamSpeedPtr := flag.Float64(glob.StreamSpeedName, 1, "multiplier for speed of stream")
 	maxBufferPtr := flag.Int(glob.MaxBufferName, 30, "maximum stream buffer in seconds")
 	initBufferPtr := flag.Int(glob.InitBufferName, 2, "initial number of segments to download before stream starts")
-	adaptPtr := flag.String(glob.AdaptName, glob.ConventionalAlg, "DASH algorithms - \""+glob.ConventionalAlg+"|"+glob.ElasticAlg+"|"+glob.ProgressiveAlg+"|"+glob.LogisticAlg+"|"+glob.MeanAverageAlg+"|"+glob.GeomAverageAlg+"|"+glob.EMWAAverageAlg+"|"+glob.ArbiterAlg+"|"+glob.BBA1Alg_AV+"|"+glob.BBA1Alg_AVXL+"|"+glob.BBA2Alg_AV+"|"+glob.BBA2Alg_AVXL_base+"\"")
+	adaptPtr := flag.String(glob.AdaptName, glob.ConventionalAlg, "DASH algorithms - \""+glob.ConventionalAlg+"|"+glob.ElasticAlg+"|"+glob.ProgressiveAlg+"|"+glob.LogisticAlg+"|"+glob.MeanAverageAlg+"|"+glob.GeomAverageAlg+"|"+glob.EMWAAverageAlg+"|"+glob.ArbiterAlg+"|"+glob.PensieveAlg+"|"+glob.BBA1Alg_AV+"|"+glob.BBA1Alg_AVXL+"|"+glob.BBA2Alg_AV+"|"+glob.BBA2Alg_AVXL_base+"\"")
+	pensieveServerPtr := flag.String(glob.PensieveServerName, "http://127.0.0.1:8333", "Pensieve external inference service endpoint - \"[http://host:port]\"")
 	storeFilesPtr := flag.String(glob.StoreFiles, glob.StoreFilesOff, "store the streamed DASH files, and associated files - \"["+glob.StoreFilesOn+"|"+glob.StoreFilesOff+"]\"")
 	fileStoreNamePtr := flag.String(glob.FileStoreName, "", "folder location within "+fileDownloadLocation+" to store the streamed DASH files - if no folder is passed, output defaults to \"../files\" folder")
 	terminalPrintPtr := flag.String(glob.TerminalPrintName, glob.TerminalPrintOff, "extend the output logs to provide additional information - \"["+glob.TerminalPrintOn+"|"+glob.TerminalPrintOff+"]\"")
@@ -196,7 +197,7 @@ func main() {
 				}
 
 				// get some new values from the config file
-				configURLPtr, configAdaptPtr, configCodecPtr, configMaxHeightPtr, configStreamDurationPtr, configStreamSpeedPtr, configMaxBufferPtr, configInitBufferPtr, configHlsPtr, configFileStoreNamePtr, configStoreFilesPtr, configGetHeaderPtr, configDebugPtr, configTerminalPrintPtr, configQuicPtr, configExpRatioPtr, configPrintHeaderPtr, configUseTestbedPtr, configQoEPtr, configLogFilePtr, configCollabPrintPtr := logging.Configure(*configPtr, glob.DebugFile, debugLog)
+				configURLPtr, configAdaptPtr, configCodecPtr, configMaxHeightPtr, configStreamDurationPtr, configStreamSpeedPtr, configMaxBufferPtr, configInitBufferPtr, configHlsPtr, configFileStoreNamePtr, configStoreFilesPtr, configGetHeaderPtr, configDebugPtr, configTerminalPrintPtr, configQuicPtr, configExpRatioPtr, configPrintHeaderPtr, configUseTestbedPtr, configQoEPtr, configLogFilePtr, configCollabPrintPtr, configPensieveServerPtr := logging.Configure(*configPtr, glob.DebugFile, debugLog)
 
 				if configURLPtr == "" {
 					log.Fatal("There is an issue with the URL parameter - this could be a malformed configuration file, please double check")
@@ -225,6 +226,7 @@ func main() {
 				utils.CheckStringVal(&configQoEPtr, QoEPtr)
 				utils.CheckStringVal(&configLogFilePtr, LogFilePtr)
 				utils.CheckStringVal(&configCollabPrintPtr, collabPrintPtr)
+				utils.CheckStringVal(&configPensieveServerPtr, pensieveServerPtr)
 
 				// set our config boolean to true
 				configSet = true
@@ -880,7 +882,7 @@ func main() {
 
 	// its time to stream, call the algorithm file in player.go
 	player.Stream(structList, glob.DebugFile, debugLog, *codecPtr, glob.CodecName, *maxHeightPtr,
-		*streamDurationPtr, *streamSpeedPtr, *maxBufferPtr, *initBufferPtr, *adaptPtr, *urlPtr, fileDownloadLocation, extendPrintLog, *hlsPtr, hlsBool, *quicPtr, quicBool, getHeaderBool, *getHeaderPtr, exponentialRatio, printHeadersData, printLog, useTestbedBool, getQoEBool, saveFilesBool, Noden, accountant)
+		*streamDurationPtr, *streamSpeedPtr, *maxBufferPtr, *initBufferPtr, *adaptPtr, *pensieveServerPtr, *urlPtr, fileDownloadLocation, extendPrintLog, *hlsPtr, hlsBool, *quicPtr, quicBool, getHeaderBool, *getHeaderPtr, exponentialRatio, printHeadersData, printLog, useTestbedBool, getQoEBool, saveFilesBool, Noden, accountant)
 
 	// ending consul
 	if *collabPrintPtr == glob.CollabPrintOn {

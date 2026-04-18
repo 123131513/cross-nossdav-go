@@ -121,6 +121,8 @@ const ArbiterAlg = "arbiter"
 // ---- Cross-layer algorithms ----
 const MeanAverageXLAlg = "averageXL"
 const MeanAverageRecentXLAlg = "averageRecentXL"
+const PensieveAlg = "pensieve"
+const PensieveServerName = "pensieveServer"
 
 // HlsOff : constants for HLS
 const HlsOff = "off"
