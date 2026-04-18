@@ -1427,6 +1427,15 @@ func streamLoop(streamStructs []http.StreamStruct, Noden P2Pconsul.NodeUrl, acco
 			//fmt.Println("old: ", repRate)
 			algo.MeanAverageRecentXLAlgo(accountant, &thrList, thr, &repRate, bandwithList, lowestMPDrepRateIndex[mimeTypeIndex])
 		case glob.PensieveAlg:
+			representationSet := mpdList[mpdListIndex].Periods[0].AdaptationSet[mimeTypes[mimeTypeIndex]].Representation
+			if representationSet[preRepRate].Chunks == "" {
+				repRate = preRepRate
+				break
+			}
+			if segmentNumber >= len(strings.Split(representationSet[preRepRate].Chunks, ",")) {
+				repRate = preRepRate
+				break
+			}
 			var err error
 			repRate, err = PensieveClient.SelectBitrate(
 				bandwithList,
@@ -1435,8 +1444,7 @@ func streamLoop(streamStructs []http.StreamStruct, Noden P2Pconsul.NodeUrl, acco
 				stallTime,
 				segSize,
 				deliveryTime,
-				segmentNumber+1,
-				mpdList[mpdListIndex].Periods[0].AdaptationSet[mimeTypes[mimeTypeIndex]].Representation,
+				segmentNumber,
 			)
 			if err != nil {
 				fmt.Printf("*** pensieve service request failed: %v ***\n", err)

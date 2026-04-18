@@ -1,27 +1,45 @@
-# Pensieve 外部推理接入修改说明
+# Pensieve 子模块接入与播放器运行说明
 
-本文档描述本次为 `godash-qlogabr` 接入官方 Pensieve 风格“外部 ABR 服务”所做的修改，并说明如何确认当前复现是否准确。
+本文档说明本次如何把 `Pensieve` 作为官方代码子模块接入当前仓库，以及如何在当前 `GoDASH` 播放器中运行它。
 
-## 1. 本次修改的原则
+## 1. 这次调整的原则
 
-本次修改遵循的系统边界是：
+本次不再维护自写的 `pensieve_service.py` 复制实现。
 
-- `GoDASH` 负责：
-  - chunk 下载
-  - buffer / stall / QoE / 日志
-  - 从 MPD 和运行时状态中提取 Pensieve 所需输入
-  - 调用外部 Pensieve 服务拿到下一段动作
-- `Pensieve service` 负责：
-  - 维护 `S_INFO x S_LEN` 状态历史
-  - 加载预训练 checkpoint
-  - 运行 actor 网络推理
-  - 返回下一段动作索引
+改为：
 
-因此，这次修改已经回退掉“在 Go 里内部重写 Pensieve 策略”的方向，改成了与官方 `hongzimao/pensieve` 中 `rl_server` / `real_exp` 一致的外部服务方式。
+- 直接把你们 fork 的 `Pensieve` 仓库接入为子模块
+- 运行时直接使用子模块中的官方 `rl_server/rl_server_no_training.py`
+- 当前仓库只保留播放器侧的接线逻辑，用来把 `GoDASH` 的 chunk 级运行时状态发给官方 Pensieve 服务
 
-## 2. 代码修改清单
+这样做的目的很明确：
 
-### 2.1 GoDASH 侧
+- 避免在本仓库中重复维护一份 Pensieve 服务代码
+- 尽量保持与官方 `hongzimao/pensieve` 实现一致
+- 后续如果你们在 Pensieve fork 中修正模型路径、环境依赖或实验脚本，当前仓库只需要更新子模块指针
+
+## 2. 新增的子模块
+
+当前仓库已新增子模块：
+
+- 路径：`paper-utilities/pensieve`
+- 远程：`https://github.com/123131513/pensieve.git`
+
+对应的 git 配置在：
+
+- `.gitmodules`
+
+克隆当前仓库后，使用者需要额外执行：
+
+```bash
+git submodule update --init --recursive
+```
+
+否则 `paper-utilities/pensieve` 目录只有子模块占位，不会有实际代码。
+
+## 3. 当前仓库中保留了哪些 Pensieve 相关修改
+
+### 3.1 GoDASH 侧入口
 
 - `cross-layer-implementation/godash-qlogabr/global/globalVar.go`
   - 新增 `PensieveAlg = "pensieve"`
@@ -29,206 +47,186 @@
 
 - `cross-layer-implementation/godash-qlogabr/logging/configParsing.go`
   - 配置结构新增 `pensieveServer`
-  - `Configure(...)` / `recupParameters(...)` 返回值增加 `pensieveServer`
 
 - `cross-layer-implementation/godash-qlogabr/main.go`
-  - `algorithmSlice` 加入 `pensieve`
-  - `-adapt` 帮助字符串加入 `pensieve`
-  - 新增参数：
-    - `-pensieveServer http://127.0.0.1:8333`
-  - 调整 `player.Stream(...)` 调用，将 `pensieveServer` 传给播放器主流程
+  - `-adapt` 支持 `pensieve`
+  - 新增 `-pensieveServer`
+
+### 3.2 GoDASH 播放器侧兼容层
 
 - `cross-layer-implementation/godash-qlogabr/player/player.go`
-  - `pensieve` 首段仍从最低码率启动，与官方 Pensieve 常见启动方式一致
-  - 在流开始时创建 `PensieveExternalClient`
-  - 播放开始前调用 `POST /reset` 清空服务端状态
-  - 下载每个 chunk 后，收集下列输入并调用 `POST /predict`
-    - `lastquality`
-    - `buffer`
-    - `RebufferTime`
-    - `lastChunkStartTime`
-    - `lastChunkFinishTime`
-    - `lastChunkSize`
-    - `nextChunkSizes`
-    - `video_chunk_remain`
-    - `videoBitRate`
-  - 新增一个强约束：
-    - 当前 `AdaptationSet` 必须恰好有 6 个表示，否则直接退出
-  - 修正尾段行为：
-    - 如果已经没有“下一段”，则不再向 Pensieve 服务请求动作，直接保持当前表示索引
+  - `pensieve` 首段从最低码率启动
+  - 每个 chunk 下载完成后，调用 Pensieve 外部服务
+  - 服务返回动作索引后，再映射回本地表示索引
 
 - `cross-layer-implementation/godash-qlogabr/algorithms/pensieve_external.go`
-  - 新增 Go 侧 HTTP 客户端
-  - 负责：
-    - 调用 `/reset`
-    - 维护累计 rebuffer 时间
-    - 将 GoDASH 本地表示索引按带宽升序映射到 Pensieve `0..5` 动作空间
-    - 从 MPD 的 `Representation[i].Chunks` 中取出“下一段各码率大小”
-    - 调用 `/predict`
-    - 将 Pensieve 返回的动作索引再映射回 GoDASH 本地表示索引
+  - 负责与外部 Pensieve 服务通信
+  - 负责把 GoDASH 本地表示索引按码率升序映射到 `0..5`
+  - 负责把 Pensieve 返回的动作再映射回本地表示索引
 
-### 2.2 外部服务侧
+## 4. 这次删除了什么
+
+已删除本仓库里自写的 Pensieve 服务副本：
 
 - `paper-utilities/pensieve-abr-server/pensieve_service.py`
-  - 新增独立 Python 推理服务
-  - 使用 `tensorflow.compat.v1` + `tflearn`
-  - 内部保留官方 Pensieve 的 actor 网络结构
-  - 维护 `6 x 8` 状态矩阵
-  - 暴露两个 HTTP 接口：
-    - `POST /reset`
-    - `POST /predict`
-  - 通过 `--model` 加载预训练 checkpoint
-
 - `paper-utilities/pensieve-abr-server/requirements.txt`
-  - 补充推荐依赖版本：
-    - `tensorflow==1.15.5`
-    - `tflearn==0.5.0`
-    - `numpy<2`
 
-## 3. 当前实现与官方 Pensieve 的对应关系
+原因是这部分逻辑现在应由子模块 `paper-utilities/pensieve` 中的官方代码承担。
 
-当前实现已经与官方架构对齐在这些方面：
+## 5. 与官方 `rl_server` 的兼容方式
 
-- 决策服务在播放器外部
-- 播放器每个 chunk 完成后上传状态
-- 服务端维护历史状态窗口
-- 服务端加载 checkpoint 并输出动作
-- 动作空间固定为 `A_DIM = 6`
+当前播放器侧兼容层按官方 `rl_server/rl_server_no_training.py` 的请求字段发送：
 
-当前实现仍然有两个需要你们自行确认的外部条件：
+- `lastquality`
+- `buffer`
+- `RebufferTime`
+- `lastChunkStartTime`
+- `lastChunkFinishTime`
+- `lastChunkSize`
+- `lastRequest`
 
-1. 你们使用的 checkpoint 是否确实来自官方 `hongzimao/pensieve` 或明确来源的预训练模型
-2. 你们的 MPD 六档码率梯度是否适合直接套用该 checkpoint
+这几点和官方服务是对齐的。
 
-也就是说：
+另外需要明确一个重要约束：
 
-- 当前代码已经是“正确的系统边界复现”
-- 但是否达到“严格意义上的官方模型效果复现”，还取决于模型文件和视频码率梯度是否匹配
+- 官方 `rl_server_no_training.py` 内部写死了六档码率：
+  - `300, 750, 1200, 1850, 2850, 4300` Kbps
 
-## 4. 运行方式
+因此当前 GoDASH 的 `pensieve` 模式做了严格限制：
 
-### 4.1 启动 Pensieve 外部服务
+1. 当前 `AdaptationSet` 必须恰好有 6 个表示
+2. 六档码率必须与官方码率梯度一致
 
-在一个单独环境中准备官方 Pensieve 可兼容的 Python 运行时，推荐：
+如果不满足这两个条件，当前实现不会把它当作“官方 Pensieve 一致复现”来运行。
 
-- Python 3.7
-- TensorFlow 1.15.x
-- TFLearn 0.5.0
+## 6. 如何运行 Pensieve 到当前播放器中
 
-然后启动服务：
+### 6.1 初始化子模块
 
 ```bash
-cd paper-utilities/pensieve-abr-server
-pip install -r requirements.txt
-python pensieve_service.py --model /path/to/pretrain_linear_reward.ckpt --port 8333
+git submodule update --init --recursive
 ```
 
-如果你想减少随机性，方便和日志对照，可以加：
+### 6.2 准备 Pensieve 环境
+
+进入子模块：
 
 ```bash
-python pensieve_service.py --model /path/to/pretrain_linear_reward.ckpt --port 8333 --deterministic
+cd paper-utilities/pensieve
 ```
 
-### 4.2 启动 GoDASH
+按照官方 README，Pensieve 原始代码测试环境较老，仓库说明里提到其测试环境为：
+
+- Ubuntu 16.04
+- TensorFlow 1.1.0
+- TFLearn 0.3.1
+- Selenium 2.39.0
+
+另外，子模块中的 `rl_server/rl_server_no_training.py` 仍是 Python 2 语法风格，直接用 `python3` 运行会报语法错误。因此这里的 `python` 应当指向与官方仓库一致的旧版解释器环境。
+
+官方 README 也给出了入口：
+
+- 安装：`python setup.py`
+- Mahimahi / rl_server：修改 `rl_server/rl_server_no_training.py` 中 `NN_MODEL`
+- 真实实验：`real_exp/`
+
+如果你们使用自己的 fork，建议至少先在 `paper-utilities/pensieve` 中确认：
+
+1. `rl_server/rl_server_no_training.py` 的 `NN_MODEL` 指向你们要用的 checkpoint
+2. 运行环境确实能启动该脚本
+
+### 6.3 启动官方 Pensieve rl_server
+
+```bash
+cd paper-utilities/pensieve/rl_server
+python rl_server_no_training.py
+```
+
+默认监听端口是 `8333`。
+
+注意：
+
+- 官方 `rl_server_no_training.py` 没有单独的 `/reset` API
+- 如果你们想确保每次实验都从干净状态开始，最稳妥的方法是：
+  - 每次播放器实验前重启一次这个 Python 进程
+- 官方服务在最后一个 chunk 会返回 `REFRESH`
+- 当前播放器侧已经对这个尾段返回值做了兼容处理
+
+### 6.4 启动当前播放器
 
 ```bash
 cd cross-layer-implementation/godash-qlogabr
 go run . -adapt pensieve -pensieveServer http://127.0.0.1:8333 ...
 ```
 
-也可以把 `pensieveServer` 写入配置文件，通过 `logging/configParsing.go` 新增的字段注入。
+其中：
 
-## 5. 如何确认“复现状态正确”
+- `-adapt pensieve` 启用 Pensieve
+- `-pensieveServer` 指向官方 `rl_server` 服务地址
 
-建议从四层检查。
+## 7. 如何确认现在确实在“用官方 Pensieve”
 
-### 5.1 架构层检查
+建议按下面顺序确认。
 
-确认以下事实：
+### 7.1 代码来源确认
 
-- `player.go` 没有再实现内部 Pensieve 打分器
-- GoDASH 只是在下载后向 `/predict` 发请求
-- Python 服务才持有 actor 网络和状态窗口
+确认这两个事实：
 
-只要这三点成立，架构边界就已经回到官方设计。
+1. 目录 `paper-utilities/pensieve` 是 git submodule
+2. 实验时启动的是：
+   - `paper-utilities/pensieve/rl_server/rl_server_no_training.py`
 
-### 5.2 接口层检查
+如果这两点成立，就说明你们运行的是子模块中的官方服务代码，而不是当前仓库的复制实现。
 
-先确认服务已启动，然后手工测试：
+### 7.2 码率梯度确认
 
-```bash
-curl -X POST http://127.0.0.1:8333/reset
+确认 MPD 的 6 档码率升序后正好是：
+
+```text
+300, 750, 1200, 1850, 2850, 4300 Kbps
 ```
 
-再发一个最小预测请求：
+如果不是这组值，那么即使服务跑起来，也不能说是“严格沿用官方 rl_server 的一致复现”，因为官方服务内部 reward 和 chunk-size 表都绑定了这组码率与视频。
 
-```bash
-curl -X POST http://127.0.0.1:8333/predict \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "lastquality": 0,
-    "buffer": 4.0,
-    "RebufferTime": 0,
-    "lastChunkStartTime": 0,
-    "lastChunkFinishTime": 800,
-    "lastChunkSize": 500000,
-    "nextChunkSizes": [400000,600000,900000,1200000,1600000,2200000],
-    "video_chunk_remain": 40,
-    "videoBitRate": [300,750,1200,1850,2850,4300]
-  }'
-```
+### 7.3 模型确认
 
-如果返回 `0..5` 的整数，说明服务接口正常。
+确认 `rl_server_no_training.py` 中的 `NN_MODEL` 指向你们想使用的 checkpoint，并且启动时能看到模型恢复成功。
 
-### 5.3 运行层检查
+### 7.4 运行确认
 
-让 GoDASH 以 `-adapt pensieve` 跑一次，确认：
+在播放器日志里确认：
 
-- 启动时没有出现
-  - `failed to reset Pensieve service`
-  - `pensieve service request failed`
-- 码率日志中确实发生切换
-- 网络状态变化时，动作不是常量
+- 没有 `pensieve service request failed`
+- 码率动作会变化
+- 网络条件变化时，动作不是常量
 
-如果全程只输出同一个动作，需要重点检查：
+## 8. 当前准确性边界
 
-- checkpoint 是否加载成功
-- 你是否启用了 `--deterministic`
-- `nextChunkSizes` / `videoBitRate` 是否始终正确变化
+当前方案相较于自写服务代码，更接近“直接使用官方 Pensieve 方案”。
 
-### 5.4 准确性层检查
+但准确性仍然取决于两个外部前提：
 
-若你们想判断“这是否是准确复现官方 Pensieve”，最低建议做这几项：
+1. 你们实际启动的确实是子模块中的官方 `rl_server_no_training.py`
+2. 你们的视频内容、chunk 大小和六码率梯度与官方服务内置假设一致
 
-1. 确认使用的是官方或可追溯来源的 checkpoint
-2. 确认输入归一化方式与官方一致
-3. 确认动作空间仍是 6 档
-4. 在一条固定 trace 上记录每个 chunk 的请求 payload 和返回动作
-5. 与官方 `real_exp` / `rl_server` 在同类输入上的动作序列做对照
+只有在这些条件成立时，才能较强地声称：
 
-如果同一组输入下动作序列一致，才能进一步说明“模型推理级别也对齐了”。
+- 当前播放器是在调用官方 Pensieve 推理服务
 
-## 6. 当前已知限制
+如果视频内容或 chunk size 已经不同，只能说：
 
-- `pensieve` 模式要求当前 `AdaptationSet` 恰好有 6 个表示
-- Python 服务依赖 TensorFlow 1.x 生态，环境要求高于 GoDASH 本体
-- 当前仓库里的老版本 `quic-go` 与本机 `go1.22.8` 不兼容，所以无法在当前环境完成完整 `go test` 构建验证
+- 当前播放器在复用官方 Pensieve 服务代码路径
+- 但实验条件未必与论文原始服务假设完全等价
 
-最后这一点属于仓库原有依赖限制，不是 Pensieve 外部服务接入本身的接口问题。
+## 9. 后续维护方式
 
-## 7. 这次修改后，什么才算“已经复现到位”
+之后如果你们要更新 Pensieve 侧实现，建议只在子模块仓库中改：
 
-如果满足以下条件，可以认为已经完成了“架构上正确、实现边界正确”的 Pensieve 复现：
+- `123131513/pensieve`
 
-1. GoDASH 只负责状态采集与请求转发
-2. 外部服务加载预训练 checkpoint
-3. 服务按官方状态维度维护历史窗口
-4. GoDASH 每段都基于服务返回动作选下一段码率
+然后回到当前仓库更新子模块指针并提交。
 
-如果再额外满足：
+这样能保持职责分离：
 
-1. 使用官方 checkpoint
-2. 六档码率梯度与官方训练条件足够接近
-3. 与官方服务在同输入下输出一致
-
-那么才能进一步说“推理行为也较准确地复现了官方 Pensieve”。
+- 当前仓库维护播放器与接线
+- 子模块仓库维护 Pensieve 原始方案代码

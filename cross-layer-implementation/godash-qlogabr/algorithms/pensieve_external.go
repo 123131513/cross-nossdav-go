@@ -11,11 +11,12 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	otherhttp "github.com/uccmisl/godash/http"
 )
 
 const pensieveServiceTimeout = 2 * time.Second
+const pensieveOfficialResetPath = "/reset"
+
+var pensieveOfficialBitratesKbps = []int{300, 750, 1200, 1850, 2850, 4300}
 
 type PensieveExternalClient struct {
 	ServerURL         string
@@ -30,9 +31,7 @@ type pensievePredictionRequest struct {
 	LastChunkFinishTime int     `json:"lastChunkFinishTime"`
 	LastChunkStartTime  int     `json:"lastChunkStartTime"`
 	LastChunkSize       int     `json:"lastChunkSize"`
-	NextChunkSizes      []int   `json:"nextChunkSizes"`
-	VideoChunkRemain    int     `json:"video_chunk_remain"`
-	VideoBitRate        []int   `json:"videoBitRate"`
+	LastRequest         int     `json:"lastRequest"`
 }
 
 func NewPensieveExternalClient(serverURL string) *PensieveExternalClient {
@@ -47,21 +46,23 @@ func NewPensieveExternalClient(serverURL string) *PensieveExternalClient {
 func (c *PensieveExternalClient) Reset() error {
 	c.TotalRebufferTime = 0
 
-	req, err := http.NewRequest(http.MethodPost, c.ServerURL+"/reset", bytes.NewReader([]byte("{}")))
+	req, err := http.NewRequest(http.MethodPost, c.ServerURL+pensieveOfficialResetPath, bytes.NewReader([]byte("{}")))
 	if err != nil {
-		return err
+		return nil
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
-		return err
+		return nil
 	}
 	defer resp.Body.Close()
 
+	// The official Pensieve rl_server has no reset endpoint.
+	// Treat reset as best-effort so the client can talk to the unmodified upstream server.
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("pensieve reset failed: %s", strings.TrimSpace(string(body)))
+		_, _ = io.ReadAll(resp.Body)
+		return nil
 	}
 	return nil
 }
@@ -73,29 +74,21 @@ func (c *PensieveExternalClient) SelectBitrate(
 	stallTimeMs int,
 	segSizeBytes int,
 	deliveryTimeMs int,
-	nextSegmentNumber int,
-	representations []otherhttp.Representation,
+	lastRequestNumber int,
 ) (int, error) {
-	if len(representations) != 6 || len(bandwithList) != 6 {
+	if len(bandwithList) != 6 {
 		return 0, errors.New("pensieve external model requires exactly 6 representations to match the official action space")
+	}
+	if err := validatePensieveOfficialBitrateLadder(bandwithList); err != nil {
+		return 0, err
 	}
 
 	if stallTimeMs > 0 {
 		c.TotalRebufferTime += stallTimeMs
 	}
 
-	remaining := getPensieveChunksRemaining(representations, nextSegmentNumber)
-	if remaining <= 0 {
-		return currentRepRate, nil
-	}
-
 	ascendingLocalIndices := sortedRepIndicesAscending(bandwithList)
 	serviceQuality, err := localRepToServiceQuality(ascendingLocalIndices, currentRepRate)
-	if err != nil {
-		return 0, err
-	}
-
-	nextChunkSizesBytes, serviceBitratesKbps, err := buildPensieveServiceInputs(representations, bandwithList, ascendingLocalIndices, nextSegmentNumber)
 	if err != nil {
 		return 0, err
 	}
@@ -107,9 +100,7 @@ func (c *PensieveExternalClient) SelectBitrate(
 		LastChunkFinishTime: deliveryTimeMs,
 		LastChunkStartTime:  0,
 		LastChunkSize:       segSizeBytes,
-		NextChunkSizes:      nextChunkSizesBytes,
-		VideoChunkRemain:    remaining,
-		VideoBitRate:        serviceBitratesKbps,
+		LastRequest:         lastRequestNumber,
 	}
 
 	body, err := json.Marshal(payload)
@@ -137,7 +128,12 @@ func (c *PensieveExternalClient) SelectBitrate(
 		return 0, fmt.Errorf("pensieve predict failed: %s", strings.TrimSpace(string(respBody)))
 	}
 
-	serviceChoice, err := strconv.Atoi(strings.TrimSpace(string(respBody)))
+	responseText := strings.TrimSpace(string(respBody))
+	if responseText == "REFRESH" {
+		return currentRepRate, nil
+	}
+
+	serviceChoice, err := strconv.Atoi(responseText)
 	if err != nil {
 		return 0, err
 	}
@@ -146,27 +142,6 @@ func (c *PensieveExternalClient) SelectBitrate(
 	}
 
 	return ascendingLocalIndices[serviceChoice], nil
-}
-
-func buildPensieveServiceInputs(representations []otherhttp.Representation, bandwithList []int, ascendingLocalIndices []int, nextSegmentNumber int) ([]int, []int, error) {
-	nextChunkSizesBytes := make([]int, len(ascendingLocalIndices))
-	serviceBitratesKbps := make([]int, len(ascendingLocalIndices))
-
-	for serviceIdx, localIdx := range ascendingLocalIndices {
-		serviceBitratesKbps[serviceIdx] = bandwithList[localIdx] / 1000
-
-		if representations[localIdx].Chunks == "" {
-			return nil, nil, fmt.Errorf("representation %d has no chunk metadata; Pensieve service needs per-chunk sizes", localIdx)
-		}
-
-		chunkBits, ok := getPensieveChunkBits(representations[localIdx].Chunks, nextSegmentNumber)
-		if !ok {
-			return nil, nil, fmt.Errorf("missing chunk metadata for next segment %d in representation %d", nextSegmentNumber, localIdx)
-		}
-		nextChunkSizesBytes[serviceIdx] = chunkBits / 8
-	}
-
-	return nextChunkSizesBytes, serviceBitratesKbps, nil
 }
 
 func sortedRepIndicesAscending(bandwithList []int) []int {
@@ -189,30 +164,20 @@ func localRepToServiceQuality(ascendingLocalIndices []int, localRepRate int) (in
 	return 0, fmt.Errorf("local representation index %d not found in Pensieve quality mapping", localRepRate)
 }
 
-func getPensieveChunkBits(chunkList string, nextSegmentNumber int) (int, bool) {
-	chunks := strings.Split(chunkList, ",")
-	index := nextSegmentNumber - 1
-	if index < 0 || index >= len(chunks) {
-		return 0, false
+func validatePensieveOfficialBitrateLadder(bandwithList []int) error {
+	ascendingLocalIndices := sortedRepIndicesAscending(bandwithList)
+	for i, localIdx := range ascendingLocalIndices {
+		if bandwithList[localIdx]/1000 != pensieveOfficialBitratesKbps[i] {
+			return fmt.Errorf("pensieve official rl_server expects bitrate ladder %v Kbps, got %v Kbps", pensieveOfficialBitratesKbps, bitratesToKbpsAscending(bandwithList, ascendingLocalIndices))
+		}
 	}
-	val, err := strconv.Atoi(chunks[index])
-	if err != nil {
-		return 0, false
-	}
-	return val, true
+	return nil
 }
 
-func getPensieveChunksRemaining(representations []otherhttp.Representation, nextSegmentNumber int) int {
-	for _, representation := range representations {
-		if representation.Chunks == "" {
-			continue
-		}
-		chunks := strings.Split(representation.Chunks, ",")
-		remaining := len(chunks) - (nextSegmentNumber - 1)
-		if remaining < 0 {
-			return 0
-		}
-		return remaining
+func bitratesToKbpsAscending(bandwithList []int, ascendingLocalIndices []int) []int {
+	kbps := make([]int, len(ascendingLocalIndices))
+	for i, localIdx := range ascendingLocalIndices {
+		kbps[i] = bandwithList[localIdx] / 1000
 	}
-	return 0
+	return kbps
 }
