@@ -506,8 +506,10 @@ paper-utilities/
     官方实验驱动脚本
 - 当前仓库不再维护 `pensieve_service.py` 副本，而是通过 `cross-layer-implementation/godash-qlogabr/algorithms/pensieve_external.go` 与这个子模块中的 `rl_server/rl_server_no_training.py` 对接。
 - 需要注意：
-  - 该子模块中的 `rl_server_no_training.py` 是旧版 Python 2 / TensorFlow 1.x 代码
-  - 当前机器若只有 `python3`，不能直接运行它
+  - 当前子模块已经被替换为 Python 3.8 / TensorFlow 2.7 迁移版
+  - `rl_server_no_training.py` 当前走 Python 3 语法和 `tf.compat.v1` 路径
+  - 但仍保留较多旧版 Pensieve 的训练、浏览器实验和系统安装脚本
+  - 当前机器若还没有安装 `tensorflow` / `tflearn`，仍然不能直接启动 `rl_server`
 
 ### `vegvisir-scripts/`
 

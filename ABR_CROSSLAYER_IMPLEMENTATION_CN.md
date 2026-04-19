@@ -338,9 +338,9 @@
 
 虽然 `pensieve` 的 Go 侧接线已经完成，但当前子模块里的官方服务还受这些外部条件限制：
 
-1. `rl_server_no_training.py` 是 Python 2 语法
-2. 依赖 TensorFlow 1.x / TFLearn 老环境
-3. 当前机器若只有 `python3` 且没有 `tensorflow`，服务无法直接启动
+1. 当前这版 `rl_server_no_training.py` 已迁到 Python 3 语法
+2. 仍然依赖 TensorFlow / TFLearn 组合，并通过 `tf.compat.v1` 保持旧图执行路径
+3. 当前机器若没有安装 `tensorflow` / `tflearn`，服务仍然无法直接启动
 
 因此这里要明确区分：
 
