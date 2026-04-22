@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lucas-clemente/quic-go/qlog"
+	"github.com/quic-go/quic-go/qlog"
 	"github.com/uccmisl/godash/logging"
 )
 

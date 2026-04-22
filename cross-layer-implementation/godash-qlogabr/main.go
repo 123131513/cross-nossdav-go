@@ -36,12 +36,13 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/lucas-clemente/quic-go/qlog"
+	"github.com/quic-go/quic-go/qlog"
 	"github.com/uccmisl/godash/P2Pconsul"
 	glob "github.com/uccmisl/godash/global"
 	"github.com/uccmisl/godash/http"
 	"github.com/uccmisl/godash/logging"
 	"github.com/uccmisl/godash/player"
+	"github.com/uccmisl/godash/transport"
 	"github.com/uccmisl/godash/utils"
 
 	xlayer "github.com/uccmisl/godash/crosslayer"
@@ -142,6 +143,9 @@ func main() {
 	terminalPrintPtr := flag.String(glob.TerminalPrintName, glob.TerminalPrintOff, "extend the output logs to provide additional information - \"["+glob.TerminalPrintOn+"|"+glob.TerminalPrintOff+"]\"")
 	hlsPtr := flag.String(glob.HlsName, glob.HlsOff, "HLS setting - used for redownloading chunks at a higher quality rep_rate - \""+glob.HlsOff+"|"+glob.HlsOn+"\"")
 	quicPtr := flag.String(glob.QuicName, glob.QuicOff, "download the stream using the QUIC transport protocol - \"["+glob.QuicOn+"|"+glob.QuicOff+"]\"")
+	transportPtr := flag.String(glob.TransportName, glob.TransportDirect, "request transport backend - \"["+glob.TransportDirect+"|"+glob.TransportMasque+"]\"")
+	masqueProxyTemplatePtr := flag.String(glob.MasqueProxyTemplateName, "", "MASQUE proxy URL template for CONNECT-UDP, for example \"https://proxy.example/.well-known/masque/udp/{target_host}/{target_port}/\"")
+	masqueInsecurePtr := flag.Bool("masqueInsecure", true, "skip MASQUE proxy TLS certificate verification")
 	expRatioPtr := flag.Float64(glob.ExpRatioName, 0, "download the stream with exponential parameter : ratio - this only works with these algorithms (XXXXXXXXX)")
 	getHeaderPtr := flag.String(glob.GetHeaderName, glob.GetHeaderOff, "get the header information for all segments across all of the MPD urls - based on:  \"["+glob.GetHeaderOff+"|"+glob.GetHeaderOn+"|"+glob.GetHeaderOnline+"|"+glob.GetHeaderOffline+"]\" "+glob.GetHeaderOff+": do not get headers, "+glob.GetHeaderOn+": get all headers defined by MPD, "+glob.GetHeaderOnline+": get headers from webserver based on algorithm input and "+glob.GetHeaderOffline+": get headers from header file based on algorithm input (file created by "+glob.GetHeaderOn+"). If getHeaders is set to "+glob.GetHeaderOn+", the client will download the headers and then stop the client")
 	printHeaderPtr := flag.String(glob.PrintHeaderName, "", "print columns based on selected print headers:")
@@ -336,6 +340,21 @@ func main() {
 		}
 	}
 
+	backend, err := transport.NewBackend(transport.Config{
+		Mode:                *transportPtr,
+		MasqueProxyTemplate: *masqueProxyTemplatePtr,
+		MasqueInsecure:      *masqueInsecurePtr,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer backend.Close()
+	http.SetTransportBackend(backend)
+	logging.DebugPrint(glob.DebugFile, debugLog, "DEBUG: ", "-"+glob.TransportName+" set to "+backend.Mode())
+	if backend.Mode() == transport.ModeMasque {
+		logging.DebugPrint(glob.DebugFile, debugLog, "DEBUG: ", "-"+glob.MasqueProxyTemplateName+" set to "+*masqueProxyTemplatePtr)
+	}
+
 	// set url is the fifth check - check the url arguement
 	if utils.IsFlagSet(glob.URLName) || configSet {
 
@@ -349,16 +368,16 @@ func main() {
 
 			// save the current MPD Rep_rate Adaptation Set
 			// check if the codec is in the MPD urls passed in
-				var codecList [][]string
-				var codecIndexList [][]int
-				codecList, codecIndexList, audioContent = http.GetCodec(structList, *codecPtr, debugLog)
+			var codecList [][]string
+			var codecIndexList [][]int
+			codecList, codecIndexList, audioContent = http.GetCodec(structList, *codecPtr, debugLog)
 
-				if len(codecList) == 0 || len(codecList[0]) == 0 {
-					fmt.Println("\n*** Unable to determine codec information from the provided MPD. Please verify the MPD structure and codec fields. ***")
-					utils.StopApp()
-				}
+			if len(codecList) == 0 || len(codecList[0]) == 0 {
+				fmt.Println("\n*** Unable to determine codec information from the provided MPD. Please verify the MPD structure and codec fields. ***")
+				utils.StopApp()
+			}
 
-				logging.DebugPrint(glob.DebugFile, debugLog, "DEBUG: ", "Audio content is set to "+strconv.FormatBool(audioContent))
+			logging.DebugPrint(glob.DebugFile, debugLog, "DEBUG: ", "Audio content is set to "+strconv.FormatBool(audioContent))
 			// determine if the passed in codec is one of the codecs we use (checking the first MPD only)
 			usedVideoCodec, codecIndex := utils.FindInStringArray(codecList[0], *codecPtr)
 			// check the codec and print error is false

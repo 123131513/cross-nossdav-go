@@ -22,19 +22,10 @@
 package http
 
 import (
-	"bufio"
 	"bytes"
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/hex"
 	"fmt"
-	"path/filepath"
-
-	"github.com/francoispqt/gojay"
-	"github.com/uccmisl/godash/logging"
-	"github.com/uccmisl/godash/utils"
-
 	"io"
 	"io/ioutil"
 	"log"
@@ -45,43 +36,22 @@ import (
 	"strings"
 	"time"
 
+	"github.com/francoispqt/gojay"
+	"github.com/uccmisl/godash/logging"
+	"github.com/uccmisl/godash/transport"
+	"github.com/uccmisl/godash/utils"
+
 	"github.com/uccmisl/godash/P2Pconsul"
 	"github.com/uccmisl/godash/P2Pconsul/HelperFunctions"
 	glob "github.com/uccmisl/godash/global"
 
 	"github.com/cavaliercoder/grab"
-	"github.com/lucas-clemente/quic-go"
-	"github.com/lucas-clemente/quic-go/http3"
-	quiclogging "github.com/lucas-clemente/quic-go/logging"
-	"github.com/lucas-clemente/quic-go/qlog"
+	"github.com/quic-go/quic-go/http3"
+	"github.com/quic-go/quic-go/qlog"
 
 	xlayer "github.com/uccmisl/godash/crosslayer"
 	abrqlog "github.com/uccmisl/godash/qlog"
 )
-
-// *** Copied from "github.com/lucas-clemente/quic-go/internal/utils"
-
-type bufferedWriteCloser struct {
-	*bufio.Writer
-	io.Closer
-}
-
-// NewBufferedWriteCloser creates an io.WriteCloser from a bufio.Writer and an io.Closer
-func NewBufferedWriteCloser(writer *bufio.Writer, closer io.Closer) io.WriteCloser {
-	return &bufferedWriteCloser{
-		Writer: writer,
-		Closer: closer,
-	}
-}
-
-func (h bufferedWriteCloser) Close() error {
-	if err := h.Writer.Flush(); err != nil {
-		return err
-	}
-	return h.Closer.Close()
-}
-
-// ***
 
 // Noden consul node
 var Noden P2Pconsul.NodeUrl
@@ -93,149 +63,61 @@ func SetNoden(node P2Pconsul.NodeUrl) {
 
 var client *http.Client = nil
 var tr *http.Transport
-var trQuic *http3.RoundTripper
+var trQuic *http3.Transport
 
 var globAccountant *xlayer.CrossLayerAccountant = nil
+var activeBackend transport.Backend = transport.NewDirectBackend()
 
 // Sets the globAccountant to the given accountant object
 func SetAccountant(acc *xlayer.CrossLayerAccountant) {
 	globAccountant = acc
+	transport.SetAccountant(acc)
+}
+
+func SetTransportBackend(backend transport.Backend) {
+	if backend == nil {
+		activeBackend = transport.NewDirectBackend()
+		transport.ResetState()
+		return
+	}
+	activeBackend = backend
+	transport.ResetState()
+}
+
+func GetActiveTransportMode() string {
+	if activeBackend == nil {
+		return glob.TransportDirect
+	}
+	return activeBackend.Mode()
+}
+
+func GetTransportSetupTimeMillis() int {
+	return int(transport.SnapshotState().TunnelSetupTime / time.Millisecond)
+}
+
+func GetOuterTransportProtocol() string {
+	proto := transport.SnapshotState().OuterProtocol
+	if proto == "" {
+		return "-"
+	}
+	return proto
+}
+
+func GetLastTransportError() string {
+	errMsg := transport.SnapshotState().LastError
+	if errMsg == "" {
+		return "-"
+	}
+	return errMsg
 }
 
 // getHTTPClient:
-func GetHTTPClient(quicBool bool, debugFile string, debugLog bool, useTestbedBool bool) (*http.Transport, *http.Client, *http3.RoundTripper) {
-
-	if client != nil {
-		return tr, client, trQuic
+func GetHTTPClient(quicBool bool, debugFile string, debugLog bool, useTestbedBool bool) (*http.Transport, *http.Client, *http3.Transport) {
+	var err error
+	tr, client, trQuic, err = activeBackend.GetHTTPClient(quicBool, debugFile, debugLog, useTestbedBool)
+	if err != nil {
+		log.Fatal(err)
 	}
-
-	var cert tls.Certificate
-	var caCertPool = x509.NewCertPool()
-	var caCert []byte
-	var config *tls.Config
-	var quicConfig *tls.Config
-
-	// if we are using the mininet testbed
-	if useTestbedBool {
-		logging.DebugPrint(debugFile, debugLog, "DEBUG: ", "Testbed in use")
-		// where are we
-		dir, err := filepath.Abs(filepath.Dir(os.Args[0]))
-		if err != nil {
-			logging.DebugPrint(debugFile, debugLog, "DEBUG: ", "Unable to determine executable location for testbed server certs")
-			log.Fatal(err)
-		}
-
-		// Read the key pair to create certificate
-		cert, err = tls.LoadX509KeyPair(dir+"/"+glob.HTTPcertLocation, dir+"/"+glob.HTTPkeyLocation)
-		if err != nil {
-			log.Println("Unable to load X509 key and cert")
-			log.Fatal(err)
-		}
-		logging.DebugPrint(debugFile, debugLog, "DEBUG: ", "loading X509 key and cert: "+dir+"/"+glob.HTTPcertLocation+" "+dir+"/"+glob.HTTPkeyLocation)
-
-		// Create a CA certificate pool and add cert.pem to it
-		caCert, err = ioutil.ReadFile(dir + "/" + glob.HTTPcertLocation)
-		if err != nil {
-			log.Println("Unable to read X509 cert")
-			log.Fatal(err)
-		}
-		logging.DebugPrint(debugFile, debugLog, "DEBUG: ", "reading X509 cert")
-
-		// add cert to pool
-		if ok := caCertPool.AppendCertsFromPEM(caCert); !ok {
-			logging.DebugPrint(debugFile, debugLog, "DEBUG: ", "No certs appended, using system certs only")
-		}
-	}
-
-	// TODO: remove, we now receive this channel from upper calls
-	//qlogEventChan := make(chan qlog.Event)
-
-	// if we want to use quic
-	if quicBool {
-		qconf := quic.Config{}
-		//qconf.KeepAlive = true
-		qconf.Tracer = qlog.NewTracer(func(_ quiclogging.Perspective, connID []byte) io.WriteCloser {
-			filename := fmt.Sprintf("logs/client_%x.qlog", connID)
-			//filename := "logs/client.qlog"
-			f, err := os.Create(filename)
-			//f, err := os.OpenFile(filename, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
-			if err != nil {
-				log.Fatal(err)
-			}
-			log.Printf("Creating qlog file %s.\n", filename)
-			return NewBufferedWriteCloser(bufio.NewWriter(f), f)
-		},
-			globAccountant.EventChannel,
-		)
-		//go printQlogEvents(qlogEventChan)
-		//accountant := xlayer.CrossLayerAccountant{EventChannel: qlogEventChan}
-		//accountant.Listen()
-
-		// if we are not using the terstbed
-		if !useTestbedBool {
-			trQuic = &http3.RoundTripper{
-				TLSClientConfig: &tls.Config{
-					RootCAs:            caCertPool,
-					InsecureSkipVerify: glob.InsecureSSL,
-				},
-				QuicConfig: &qconf,
-			}
-			defer trQuic.Close()
-			client = &http.Client{
-				Transport: trQuic,
-			}
-		} else {
-
-			// lets try the testbed using IETF quic
-			// set up the config
-			logging.DebugPrint(debugFile, debugLog, "DEBUG: ", "creating tls config for quic")
-			quicConfig = &tls.Config{
-				// use insecure SSL - if needed only use during internal tests
-				// this is set statically in the globalVar.go file (set to true if needed)
-				InsecureSkipVerify: glob.InsecureSSL,
-				RootCAs:            caCertPool,
-				Certificates:       []tls.Certificate{cert},
-			}
-			// set up our http transport
-			logging.DebugPrint(debugFile, debugLog, "DEBUG: ", "creating our http transport using our tls config for quic")
-
-			trQuic = &http3.RoundTripper{TLSClientConfig: quicConfig, QuicConfig: &qconf, DisableCompression: true}
-			// set up the client
-			logging.DebugPrint(debugFile, debugLog, "DEBUG: ", "creating our client using our http transport and our tls config for quic")
-			client = &http.Client{Transport: trQuic}
-		}
-		// otherwise use a normal-ish HTTP client
-	} else {
-		// set up a secure-ish http client with out quic
-		if useTestbedBool {
-			// set up the config
-			logging.DebugPrint(debugFile, debugLog, "DEBUG: ", "creating tls config")
-			config = &tls.Config{
-				// use insecure SSL - if needed only use during internal tests
-				// this is set statically in the globalVar.go file (set to true if needed)
-				InsecureSkipVerify: glob.InsecureSSL,
-				RootCAs:            caCertPool,
-				Certificates:       []tls.Certificate{cert},
-			}
-			// set up our http transport
-			logging.DebugPrint(debugFile, debugLog, "DEBUG: ", "creating our http transport using our tls config")
-			tr = &http.Transport{TLSClientConfig: config}
-			// set up the client
-			logging.DebugPrint(debugFile, debugLog, "DEBUG: ", "creating our client using our http transport and our tls config")
-			client = &http.Client{Transport: tr}
-
-		} else {
-			logging.DebugPrint(debugFile, debugLog, "DEBUG: ", "setup default client but with a defined ssl security check")
-			config = &tls.Config{
-				// use insecure SSL - if needed only use during internal tests
-				// this is set statically in the globalVar.go file (set to true if needed)
-				InsecureSkipVerify: glob.InsecureSSL,
-			}
-			tr = &http.Transport{TLSClientConfig: config}
-			client = &http.Client{Transport: tr}
-		}
-	}
-
 	return tr, client, trQuic
 
 }
@@ -249,7 +131,7 @@ func getURLBody(url string, isByteRangeMPD bool, startRange int, endRange int, q
 	var client *http.Client
 	var err error
 	// var tr *http.Transport
-	// var trQuic *http3.RoundTripper
+	// var trQuic *http3.Transport
 	var contentLen = 0
 
 	// assign the protocols for this client
@@ -374,7 +256,7 @@ func getURLBody(url string, isByteRangeMPD bool, startRange int, endRange int, q
 	}
 
 	// get protocol version
-	protocol := resp.Proto
+	protocol := activeBackend.ProtocolLabel(resp.Proto)
 	status := resp.StatusCode
 
 	logging.DebugPrint(debugFile, debugLog, "DEBUG: ", "URL is : "+url)

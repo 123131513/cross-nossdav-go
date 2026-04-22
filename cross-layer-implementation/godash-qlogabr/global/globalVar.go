@@ -208,6 +208,18 @@ const HlsName = "hls"
 // QuicName : parameter variables
 const QuicName = "quic"
 
+// TransportName : parameter variables
+const TransportName = "transport"
+
+// TransportDirect : direct client to server transport
+const TransportDirect = "direct"
+
+// TransportMasque : MASQUE CONNECT-UDP transport
+const TransportMasque = "masque"
+
+// MasqueProxyTemplateName : parameter variables
+const MasqueProxyTemplateName = "masqueProxyTemplate"
+
 // AppName : parameter variables
 const AppName = "goDASH"
 
@@ -347,6 +359,21 @@ const SegReplaceHeader = "Seg_Repl"
 
 // HTTPProtocolHeader : header for
 const HTTPProtocolHeader = "Protocol"
+
+// TransportModeHeader : header for
+const TransportModeHeader = "TransportMode"
+
+// InnerProtocolHeader : header for
+const InnerProtocolHeader = "InnerProtocol"
+
+// OuterProtocolHeader : header for
+const OuterProtocolHeader = "OuterProtocol"
+
+// TunnelSetupMsHeader : header for
+const TunnelSetupMsHeader = "TunnelSetupMs"
+
+// TransportErrorHeader : header for
+const TransportErrorHeader = "TransportError"
 
 // QOE
 

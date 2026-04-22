@@ -15,7 +15,7 @@ import (
 
 // Setting of this only works when quic-go is used as a library.
 // When building a binary from this repository, the version can be set using the following go build flag:
-// -ldflags="-X github.com/lucas-clemente/quic-go/qlog.quicGoVersion=foobar"
+// -ldflags="-X github.com/quic-go/quic-go/qlog.quicGoVersion=foobar"
 var goDashVersion = "(devel)"
 
 func init() {
