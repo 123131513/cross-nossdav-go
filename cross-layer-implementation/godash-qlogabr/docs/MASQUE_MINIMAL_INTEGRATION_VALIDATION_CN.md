@@ -21,6 +21,106 @@
 
 为避免阅读时混淆，本文第 8 到第 12 节记录的是“第一次最小验证时的失败状态”，第 13 节以后记录的是“继续协议级调试后最终跑通的状态”。
 
+## 1.2 多模式接入更新
+
+在最小 `direct / masque` 双路径基础上，当前 GoDASH 已继续接入 TECC fork 中的多种隧道模式。`masque` 保留为兼容旧实验的别名，语义等同于 MDT baseline。
+
+当前可用 `-transport`：
+
+- `direct`：原始 HTTP/3 直连，不经过 MASQUE/TECC 隧道。
+- `masque`：兼容别名，等同于 `mdt`。
+- `mdt`：MASQUE Datagram Tunnel，外层走 QUIC DATAGRAM。
+- `mst`：MASQUE Stream Tunnel，外层走 QUIC stream。
+- `mft`：forwarding baseline，当前在 GoDASH 侧按 direct-like forwarding baseline 记录模式。
+- `rmdt`：MDT + tunnel-side retransmission。
+- `rmdt-bbr`：RMDT + tunnel-side CC 实验标签；实际 tunnel CC 仍主要由 TECC proxy 启动参数控制。
+- `tecc`：RMDT + TECC feedback forwarding，用于 full/lite TECC 实验。
+
+依赖切换：
+
+- GoDASH 现在通过 `go.mod` 使用 `/home/hellodaniel0/TECC/forks/masque-go-tecc`：
+
+```text
+replace github.com/quic-go/masque-go => ../../../TECC/forks/masque-go-tecc
+```
+
+### 如何切换模式
+
+所有 MASQUE/TECC 类模式都需要 `-quic on` 和 `-masqueProxyTemplate`。只切换 `-transport` 即可更换客户端模式：
+
+```bash
+./godash \
+  -url "[https://127.0.0.1:4433/moi.mpd]" \
+  -quic on \
+  -transport mdt \
+  -masqueProxyTemplate "https://127.0.0.1:5543/masque?h={target_host}&p={target_port}" \
+  -adapt bba2 \
+  -streamDuration 120 \
+  -debug on \
+  -terminalPrint on
+```
+
+把上面的 `-transport mdt` 换成以下任一值即可：
+
+```text
+direct
+masque
+mdt
+mst
+mft
+rmdt
+rmdt-bbr
+tecc
+```
+
+注意：
+
+- `direct` 和当前 `mft` 不需要 `-masqueProxyTemplate`。
+- `masque` 与 `mdt` 都是 datagram tunnel baseline，建议新实验使用 `mdt`，旧脚本可继续使用 `masque`。
+- `mst / rmdt / tecc` 需要 TECC 版 proxy 侧用对应参数启动，否则 client 侧模式与 proxy 侧能力不匹配会失败或退化。
+- `rmdt-bbr` 只是 GoDASH 侧的模式标签；是否启用 tunnel-side BBR/CC 取决于 TECC proxy 的启动参数。
+
+### TECC/RMDT 指标采集
+
+GoDASH 已新增以下原始日志字段，可通过 `-printHeader` 选择输出：
+
+```text
+TunnelRetrans
+TunnelRetransRate
+TunnelQueueBytes
+TunnelBwEstimate
+TunnelTargetRate
+TunnelFeedbackRTT
+ServerSendRate
+TunnelForwardRate
+```
+
+推荐 TECC/RMDT 实验额外传入 proxy debug URL：
+
+```bash
+-teccProxyDebugURL "https://127.0.0.1:5543/debug/rmdt"
+```
+
+TECC full/lite 实验如果需要 client 转发 tunnel feedback 到 content server，再传：
+
+```bash
+-teccFeedbackForwardURL "http://127.0.0.1:8090/feedback"
+```
+
+指标来源说明：
+
+- `TunnelRetrans / TunnelRetransRate` 来自 TECC proxy debug JSON 的 RMDT retransmission counters。
+- `TunnelQueueBytes / TunnelBwEstimate / TunnelForwardRate / TunnelFeedbackRTT` 来自 TECC feedback/debug snapshot；队列字段按 tunnel packet 数近似换算为 bytes。
+- `ServerSendRate / TunnelTargetRate` 优先来自 TECC server 返回的 `X-TECC-Pacing-Rate-Bps` 响应头；普通 video server 不返回该头时该字段为 `-`。
+
+最小推荐运行顺序：
+
+1. `direct`：确认普通 DASH/HTTP3 基线正常。
+2. `mdt` 或 `masque`：确认 datagram tunnel baseline 正常。
+3. `mst`：确认 stream tunnel 能跑通。
+4. `rmdt`：确认 tunnel retransmission 与 debug 指标能记录。
+5. `tecc`：先跑 `tecc-lite` 记录 feedback，再接 full TECC server pacing。
+
 ## 2. 本轮最小实施顺序
 
 本轮实际执行的顺序如下：
@@ -2047,3 +2147,1224 @@ python3 scripts/run_experiment_matrix.py \
    - `runs.csv`
    - 关键 transport 字段输出是否完整
 4. 确认无误后，再扩大 `bw / delay / loss / iterations` 规模
+
+### 29.9 本轮执行情况
+
+#### A. `--dry-run` 已通过
+
+执行命令：
+
+```bash
+cd /home/hellodaniel0/has-quicgo
+python3 scripts/run_experiment_matrix.py configs/experiment_matrix_minimal.json --dry-run
+```
+
+展开结果：
+
+- `total_runs=4`
+- `direct + bba2`
+- `direct + conventional`
+- `masque + bba2`
+- `masque + conventional`
+
+这说明当前最小矩阵已按预期展开为：
+
+- `2 transport × 2 abr × 1 bw × 1 delay × 1 loss × 1 iteration`
+
+#### B. 最小 4 组矩阵已实际跑完
+
+执行命令：
+
+```bash
+cd /home/hellodaniel0/has-quicgo
+sudo python3 scripts/run_experiment_matrix.py configs/experiment_matrix_minimal.json
+```
+
+最新 batch 目录：
+
+```text
+/home/hellodaniel0/has-quicgo/results/batch_runs/phase2-direct-masque-compare-20260422-174027
+```
+
+`runs.csv` 结果：
+
+- `direct / bba2`: `success`, `exit_code=0`
+- `direct / conventional`: `success`, `exit_code=0`
+- `masque / bba2`: `success`, `exit_code=0`
+- `masque / conventional`: `success`, `exit_code=0`
+
+本轮共 `4/4` 全部成功。
+
+#### C. 对应实验归档目录
+
+本轮自动生成的实验归档目录为：
+
+- `results/experiments/phase2-direct-masque-compare-20260422-174027__direct__bba2__bw5__d20ms__l0__r1`
+- `results/experiments/phase2-direct-masque-compare-20260422-174027__direct__conventional__bw5__d20ms__l0__r1`
+- `results/experiments/phase2-direct-masque-compare-20260422-174027__masque__bba2__bw5__d20ms__l0__r1`
+- `results/experiments/phase2-direct-masque-compare-20260422-174027__masque__conventional__bw5__d20ms__l0__r1`
+
+#### D. 关键 transport 字段检查
+
+已检查每组实验归档下的 `logDownload.txt`，transport 相关字段完整输出。
+
+`direct` 两组结果：
+
+- `TransportMode = direct`
+- `InnerProtocol = HTTP/3.0`
+- `OuterProtocol = -`
+- `TunnelSetupMs = 0`
+- `TransportError = -`
+
+`masque` 两组结果：
+
+- `TransportMode = masque`
+- `InnerProtocol = HTTP/3.0`
+- `OuterProtocol = HTTP/3.0 CONNECT-UDP`
+- `TunnelSetupMs = 169~177 ms`
+- `TransportError = -`
+
+#### E. 本轮结论
+
+本轮最小矩阵 runner 实测结果表明：
+
+- 本地与 Mininet 下，`direct / masque` 两种模式当前都已可用
+- 最小 runner 当前可以正常执行
+- QoE 输出仍包含：
+  - `P.1203`
+  - `Clae`
+  - `Duanmu`
+  - `Yin`
+  - `Yu`
+- 当前已经可以进入下一轮更大规模的 direct vs MASQUE 对照实验
+
+### 29.10 8 组稳定性与 delay 扩展验证
+
+#### A. `iterations=2` 的 8 组重复稳定性
+
+配置文件：
+
+- `configs/experiment_matrix_8runs_iterations2.json`
+
+执行命令：
+
+```bash
+cd /home/hellodaniel0/has-quicgo
+python3 scripts/run_experiment_matrix.py configs/experiment_matrix_8runs_iterations2.json --dry-run
+sudo python3 scripts/run_experiment_matrix.py configs/experiment_matrix_8runs_iterations2.json
+```
+
+矩阵规模：
+
+- `2 transport × 2 abr × 1 bw × 1 delay × 1 loss × 2 iterations = 8`
+
+batch 目录：
+
+```text
+/home/hellodaniel0/has-quicgo/results/batch_runs/phase2-direct-masque-compare-8runs-iter2-20260422-174555
+```
+
+结果：
+
+- `8/8` 全部成功
+- `direct` 两次重复均为：
+  - `TransportMode = direct`
+  - `TunnelSetupMs = 0`
+  - `TransportError = -`
+- `masque` 两次重复均为：
+  - `TransportMode = masque`
+  - `OuterProtocol = HTTP/3.0 CONNECT-UDP`
+  - `TunnelSetupMs = 169~188 ms`
+  - `TransportError = -`
+
+结论：
+
+- 同一网络条件下重复运行稳定
+- 可以继续引入网络条件维度
+
+#### B. `delay=20ms/50ms` 的 8 组网络条件验证
+
+配置文件：
+
+- `configs/experiment_matrix_8runs_delay2.json`
+
+执行命令：
+
+```bash
+cd /home/hellodaniel0/has-quicgo
+python3 scripts/run_experiment_matrix.py configs/experiment_matrix_8runs_delay2.json --dry-run
+sudo python3 scripts/run_experiment_matrix.py configs/experiment_matrix_8runs_delay2.json
+```
+
+矩阵规模：
+
+- `2 transport × 2 abr × 1 bw × 2 delay × 1 loss × 1 iteration = 8`
+
+第一次运行结果：
+
+- batch 目录：
+
+```text
+/home/hellodaniel0/has-quicgo/results/batch_runs/phase2-direct-masque-compare-8runs-delay2-20260422-191041
+```
+
+- 结果：`6/8` 成功，`2/8` 失败
+- 失败组合：
+  - `direct / conventional / bw=5 / delay=50ms / loss=0`
+  - `masque / bba2 / bw=5 / delay=50ms / loss=0`
+
+失败原因定位：
+
+- 不是主链路失败
+- 是 `topo_test.py` 的 precheck 使用 `curl` 结果做硬判定
+- 在 `50ms` 条件下出现：
+
+```text
+curl: (8) Header without colon
+Prechecks failed. The script will not start the client.
+```
+
+#### C. `topo_test.py` precheck 最小修补
+
+修改文件：
+
+- `/home/hellodaniel0/has-quicgo/scripts/topo_test.py`
+
+修补原则：
+
+- 保留 `ping` 检查
+- 增加服务端 `UDP 4433` 监听检查
+- MASQUE 模式增加代理 `UDP 4443` 监听检查
+- `curl` 改为附加信息，不再作为硬失败条件
+
+目的：
+
+- 避免在较高 delay 条件下因为 `curl fallback` 脆弱性误杀实验
+
+#### D. 修补后重跑 `delay2`
+
+重跑命令：
+
+```bash
+cd /home/hellodaniel0/has-quicgo
+sudo python3 scripts/run_experiment_matrix.py configs/experiment_matrix_8runs_delay2.json
+```
+
+重跑 batch 目录：
+
+```text
+/home/hellodaniel0/has-quicgo/results/batch_runs/phase2-direct-masque-compare-8runs-delay2-20260422-192638
+```
+
+重跑结果：
+
+- `8/8` 全部成功
+
+关键字段结果：
+
+- `direct / 50ms`：
+  - `TransportMode = direct`
+  - `TunnelSetupMs = 0`
+  - `TransportError = -`
+- `masque / 50ms`：
+  - `TransportMode = masque`
+  - `OuterProtocol = HTTP/3.0 CONNECT-UDP`
+  - `TunnelSetupMs = 416~418 ms`
+  - `TransportError = -`
+
+结论：
+
+- `delay=20ms/50ms` 条件下 direct / MASQUE 都可稳定跑通
+- precheck 误判问题已最小修复
+
+### 29.11 `bw` 扩展与小丢包矩阵验证
+
+#### A. 先扩 `bw`，不扩 `loss`
+
+配置文件：
+
+- `configs/experiment_matrix_bw_only.json`
+
+执行命令：
+
+```bash
+cd /home/hellodaniel0/has-quicgo
+python3 scripts/run_experiment_matrix.py configs/experiment_matrix_bw_only.json --dry-run
+sudo python3 scripts/run_experiment_matrix.py configs/experiment_matrix_bw_only.json
+```
+
+矩阵规模：
+
+- `2 transport × 2 abr × 3 bw × 2 delay × 1 loss × 1 iteration = 24`
+
+batch 目录：
+
+```text
+/home/hellodaniel0/has-quicgo/results/batch_runs/phase2-direct-masque-compare-bw-only-20260422-193204
+```
+
+结果：
+
+- `24/24` 全部成功
+
+结论：
+
+- 在 `bw = [3, 5, 10]`
+- `delay = [20ms, 50ms]`
+- `loss = 0`
+
+这些条件下，`direct / masque` 与 `bba2 / conventional` 都已稳定跑通。
+
+#### B. 在稳定 `bw` 基础上加入 `loss = [0, 0.5]`
+
+配置文件：
+
+- `configs/experiment_matrix_bw_loss_small.json`
+
+执行命令：
+
+```bash
+cd /home/hellodaniel0/has-quicgo
+python3 scripts/run_experiment_matrix.py configs/experiment_matrix_bw_loss_small.json --dry-run
+sudo python3 scripts/run_experiment_matrix.py configs/experiment_matrix_bw_loss_small.json
+```
+
+矩阵规模：
+
+- `2 transport × 2 abr × 3 bw × 2 delay × 2 loss × 1 iteration = 48`
+
+batch 目录：
+
+```text
+/home/hellodaniel0/has-quicgo/results/batch_runs/phase2-direct-masque-compare-bw-loss-small-20260422-193643
+```
+
+结果：
+
+- `47/48` 成功
+- `1/48` 失败
+
+唯一失败组合：
+
+- `masque / bba2 / bw=5 / delay=50ms / loss=0.5`
+
+对应实验目录：
+
+```text
+/home/hellodaniel0/has-quicgo/results/experiments/phase2-direct-masque-compare-bw-loss-small-20260422-193643__masque__bba2__bw5__d50ms__l0.5__r1
+```
+
+当前结论：
+
+- `bw` 扩展已闭环
+- 小丢包矩阵整体可运行，但尚未完全闭环
+- 当前已收敛到单一失败组合，后续应优先定位该组合失败原因
+
+#### C. 失败组定位与最小修补
+
+对唯一失败组合进行日志检查后，确认其失败类型为：
+
+- precheck 失败
+
+不是：
+
+- transport error
+- 超时
+- 内容下载阶段失败
+
+根因：
+
+- 当 `loss=0.5` 时，`ping -c 3` 出现了非零丢包
+- 旧 precheck 仍要求 `ping` 必须 `0% packet loss`
+- 导致脚本在客户端真正启动前就提前退出
+
+最小修补内容：
+
+- 当 `loss <= 0` 时，仍要求 `ping` 为 `0% packet loss`
+- 当 `loss > 0` 时，只要求 `ping` 至少有响应
+- `server/proxy` 监听检查保持不变
+
+对应文件：
+
+- `/home/hellodaniel0/has-quicgo/scripts/topo_test.py`
+
+#### D. 单组重跑确认
+
+重跑命令：
+
+```bash
+cd /home/hellodaniel0/has-quicgo
+sudo python3 scripts/topo_test.py \
+  --transport masque \
+  --bw 5 \
+  --delay 50ms \
+  --loss 0.5 \
+  --run-server \
+  --run-proxy \
+  --run-client \
+  --adapt bba2 \
+  --stream-duration 2 \
+  --experiment-name stage2-single-rerun-masque-bba2-bw5-d50-l0.5
+```
+
+结果：
+
+- 该单组已通过
+- 客户端成功启动并完成下载
+- 关键字段正常输出：
+  - `TransportMode = masque`
+  - `OuterProtocol = HTTP/3.0 CONNECT-UDP`
+  - `TunnelSetupMs = 422`
+  - `TransportError = -`
+
+这说明原先的失败不是 MASQUE 主链路问题，而是有损链路下 precheck 判定过严。
+
+#### E. 修补后整批重跑
+
+重跑命令：
+
+```bash
+cd /home/hellodaniel0/has-quicgo
+sudo python3 scripts/run_experiment_matrix.py configs/experiment_matrix_bw_loss_small.json
+```
+
+重跑 batch 目录：
+
+```text
+/home/hellodaniel0/has-quicgo/results/batch_runs/phase2-direct-masque-compare-bw-loss-small-20260422-195443
+```
+
+重跑结果：
+
+- `48/48` 全部成功
+
+最终结论：
+
+- `bw + loss=[0,0.5]` 的 48 组矩阵在修补 precheck 后已全部跑通
+- 当前 `bw` 与小丢包实验层面已闭环
+
+### 29.12 当前实验自动化状态总结
+
+截至本轮，最小实验矩阵 runner 的状态为：
+
+已完成：
+
+- 最小 `4` 组矩阵：`4/4` 成功
+- `iterations=2` 的 `8` 组重复稳定性：`8/8` 成功
+- `delay=20ms/50ms` 的 `8` 组网络条件验证：修补 precheck 后 `8/8` 成功
+- `bw` 扩展的 `24` 组矩阵：`24/24` 成功
+- `bw + loss=[0,0.5]` 的 `48` 组矩阵：修补 precheck 后 `48/48` 成功
+
+推荐后续顺序：
+
+1. 在当前已闭环矩阵基础上整理结果表和可视化输入
+2. 再决定是否继续扩大 `loss` 档位或增加 `iterations`
+3. 若继续扩展，优先保持最小改动，不再回退当前 precheck 修补
+
+### 29.13 当前闭环实验结果初步对比
+
+本节基于已导出的汇总 CSV：
+
+- `/home/hellodaniel0/has-quicgo/results/summaries/phase2_closed_loop_per_run.csv`
+- `/home/hellodaniel0/has-quicgo/results/summaries/phase2_closed_loop_aggregated.csv`
+
+统计范围：
+
+- `4` 个已闭环 batch
+- `88` 条成功运行
+- `48` 个条件组
+
+#### A. `direct` vs `masque` 的 `TunnelSetupMs` 对比
+
+整体统计：
+
+- `direct`
+  - 运行数：`44`
+  - 平均 `TunnelSetupMs`：`0.0 ms`
+  - 最小/最大：`0 / 0`
+- `masque`
+  - 运行数：`44`
+  - 平均 `TunnelSetupMs`：`302.2 ms`
+  - 最小/最大：`169 / 1125`
+
+按 `delay` 聚合：
+
+- `20ms`
+  - `direct`: `0.0 ms`
+  - `masque`: `176.2 ms`
+- `50ms`
+  - `direct`: `0.0 ms`
+  - `masque`: `453.5 ms`
+
+按 `delay + loss` 聚合：
+
+- `masque / 20ms / loss=0`: `175.3 ms`
+- `masque / 20ms / loss=0.5`: `178.8 ms`
+- `masque / 50ms / loss=0`: `418.3 ms`
+- `masque / 50ms / loss=0.5`: `535.5 ms`
+
+结论：
+
+- `direct` 没有隧道建立成本，`TunnelSetupMs` 始终为 `0`
+- `masque` 存在真实的隧道建立时延
+- `masque` 的 `TunnelSetupMs` 随网络 delay 增大而明显上升
+- 在 `50ms + loss=0.5` 下，`TunnelSetupMs` 波动更大，最大值达到 `1125 ms`
+
+#### B. `bw / delay / loss` 对视频下载指标的影响
+
+观察指标：
+
+- `video_del_time`
+- `video_del_rate`
+- `video_rtt`
+
+按 `bw` 聚合：
+
+- `bw=3`
+  - `video_del_time`: `545.7 ms`
+  - `video_del_rate`: `1818.0`
+  - `video_rtt`: `143.1 ms`
+- `bw=5`
+  - `video_del_time`: `431.3 ms`
+  - `video_del_rate`: `2455.7`
+  - `video_rtt`: `130.6 ms`
+- `bw=10`
+  - `video_del_time`: `450.1 ms`
+  - `video_del_rate`: `2552.8`
+  - `video_rtt`: `146.2 ms`
+
+结论：
+
+- 从 `3 Mbps` 到 `5 Mbps`，视频下载时延明显下降，下载速率明显上升
+- 从 `5 Mbps` 到 `10 Mbps` 的收益不再线性增加
+- 当前实验是短时 `2s` smoke test，吞吐收益没有完全展开
+
+按 `delay` 聚合：
+
+- `20ms`
+  - `video_del_time`: `324.3 ms`
+  - `video_del_rate`: `3001.6`
+  - `video_rtt`: `84.5 ms`
+- `50ms`
+  - `video_del_time`: `639.7 ms`
+  - `video_del_rate`: `1476.3`
+  - `video_rtt`: `202.8 ms`
+
+结论：
+
+- `delay` 是当前影响最明显的网络因素
+- 从 `20ms` 到 `50ms` 后：
+  - `video_del_time` 约翻倍
+  - `video_del_rate` 明显下降
+  - `video_rtt` 明显上升
+
+按 `loss` 聚合：
+
+- `loss=0`
+  - `video_del_time`: `443.3 ms`
+  - `video_del_rate`: `2406.8`
+  - `video_rtt`: `135.2 ms`
+- `loss=0.5`
+  - `video_del_time`: `532.5 ms`
+  - `video_del_rate`: `2045.3`
+  - `video_rtt`: `146.5 ms`
+
+结论：
+
+- `0.5%` 的轻微丢包已经带来可见影响
+- 表现为：
+  - `video_del_time` 增大
+  - `video_del_rate` 降低
+  - `video_rtt` 略有上升
+- 该影响小于 `delay` 变化带来的影响，但趋势稳定存在
+
+#### C. `bba2` vs `conventional` 的 QoE 对比
+
+当前 QoE 指标：
+
+- `P.1203`
+- `Clae`
+- `Duanmu`
+- `Yin`
+- `Yu`
+
+`bba2`，`44` 条成功运行：
+
+- `P.1203 = 0.000`
+- `Clae = 0.111`
+- `Duanmu = 53.056`
+- `Yin = -5477.728`
+- `Yu = 0.522`
+
+`conventional`，`44` 条成功运行：
+
+- `P.1203 = 0.000`
+- `Clae = 0.111`
+- `Duanmu = 53.056`
+- `Yin = -5477.728`
+- `Yu = 0.522`
+
+结论：
+
+- 当前短时实验中，`bba2` 与 `conventional` 的 QoE 指标没有拉开差异
+- 主要原因是：
+  - `streamDuration=2`
+  - 每轮只覆盖非常短的下载过程
+  - 多数日志只包含第一段 audio 与第一段 video
+  - ABR 没有充分经历多轮 buffer 与码率选择变化
+- 因此当前结果更适合证明 transport 与网络条件影响
+- 不适合直接作为 ABR QoE 优劣排序结论
+
+后续若要比较 ABR QoE，应优先：
+
+1. 增大 `streamDuration`
+2. 增加 `iterations`
+3. 让客户端经历更多 segment 下载与码率切换
+
+### 29.14 最小绘图脚本与核心图输出
+
+#### A. 绘图脚本
+
+新增脚本：
+
+```text
+/home/hellodaniel0/has-quicgo/scripts/plot_matrix_summary.py
+```
+
+默认输入：
+
+```text
+/home/hellodaniel0/has-quicgo/results/summaries/phase2_closed_loop_per_run.csv
+/home/hellodaniel0/has-quicgo/results/summaries/phase2_closed_loop_aggregated.csv
+```
+
+执行命令：
+
+```bash
+cd /home/hellodaniel0/has-quicgo
+python3 scripts/plot_matrix_summary.py
+```
+
+输出目录：
+
+```text
+/home/hellodaniel0/has-quicgo/results/visualizations/
+```
+
+#### B. 已生成核心图
+
+当前已生成以下图片：
+
+- `01_tunnel_setup_by_delay.png`
+  - `direct` vs `MASQUE` 的 `TunnelSetupMs`
+  - 按 `delay=20ms/50ms` 对比
+- `02_network_effect_video_del_time.png`
+  - `bw / delay / loss` 对 `video_del_time` 的影响
+- `03_network_effect_video_del_rate.png`
+  - `bw / delay / loss` 对 `video_del_rate` 的影响
+- `04_network_effect_video_rtt.png`
+  - `bw / delay / loss` 对 `video_rtt` 的影响
+- `05_qoe_by_abr.png`
+  - `bba2` vs `conventional` 的 QoE 对比
+  - 包含 `P.1203 / Clae / Duanmu / Yin / Yu`
+- `06_qlog_coverage.png`
+  - `direct / MASQUE` 下 inner / outer qlog 覆盖率
+- `07_transport_error_rate.png`
+  - `direct / MASQUE` 下 `TransportError` 出现率
+
+#### C. 图 01 的检查结论
+
+最初观察到 `01_tunnel_setup_by_delay.png` 中 `direct` 看起来没有柱子。
+
+检查后确认：
+
+- 不是实验数据缺失
+- 也不是 CSV 解析错误
+- 原因是 `direct` 的 `TunnelSetupMs` 真实值全部为 `0`
+- `0` 高度柱状图在默认绘图中不可见
+
+对应数据：
+
+- `direct / 20ms`
+  - 样本数：`24`
+  - 平均 `TunnelSetupMs`: `0.0 ms`
+- `direct / 50ms`
+  - 样本数：`20`
+  - 平均 `TunnelSetupMs`: `0.0 ms`
+- `masque / 20ms`
+  - 样本数：`24`
+  - 平均 `TunnelSetupMs`: `176.2 ms`
+- `masque / 50ms`
+  - 样本数：`20`
+  - 平均 `TunnelSetupMs`: `453.5 ms`
+
+#### D. 绘图脚本修正
+
+已对绘图脚本做最小修正：
+
+- 对柱状图增加数值标注
+- 对 `0` 值显式标注 `0`
+- 对 QoE 图改为每个指标一个子图，避免 `Yin` 的大负值压扁其他指标
+
+修正后重新生成所有图片。
+
+#### E. 当前绘图结论
+
+当前图片可以支持以下结论：
+
+1. `direct` 的 `TunnelSetupMs` 始终为 `0`
+2. `MASQUE` 存在真实隧道建立时延，且随 `delay` 增大明显上升
+3. `delay` 对 `video_del_time / video_del_rate / video_rtt` 的影响最明显
+4. `loss=0.5` 会带来可见但相对温和的性能退化
+5. 当前短时实验下，`bba2` 与 `conventional` 的 QoE 没有明显差异
+6. `MASQUE` 下 outer qlog 覆盖率为 `100%`
+7. 成功实验中 `TransportError` 出现率为 `0%`
+
+#### F. 注意事项
+
+当前图表基于短时 `streamDuration=2` 的实验结果。
+
+因此：
+
+- 适合展示 transport 与网络条件影响
+- 适合验证 qlog 与指标链路是否完整
+- 不适合直接作为 ABR QoE 优劣的最终结论
+
+### 29.15 正式实验准备与 120s pilot 检查
+
+#### A. 新增正式实验配置
+
+为进入更正式的 direct vs MASQUE QoE 对照实验，新增以下配置文件：
+
+- `/home/hellodaniel0/has-quicgo/configs/formal_matrix_pilot_120s.json`
+- `/home/hellodaniel0/has-quicgo/configs/formal_matrix_baseline_120s.json`
+- `/home/hellodaniel0/has-quicgo/configs/formal_matrix_loss_120s.json`
+
+配置目标：
+
+- `formal_matrix_pilot_120s.json`
+  - 6 组 pilot
+  - `transport = [direct, masque]`
+  - `abr = [conventional, bba2, elastic]`
+  - `bw = [5]`
+  - `delay = [30ms]`
+  - `loss = [0]`
+  - `streamDuration = 120`
+- `formal_matrix_baseline_120s.json`
+  - 162 组正式 baseline
+  - `transport = [direct, masque]`
+  - `abr = [conventional, bba2, elastic]`
+  - `bw = [3, 5, 10]`
+  - `delay = [10ms, 30ms, 60ms]`
+  - `loss = [0]`
+  - `iterations = 3`
+  - `streamDuration = 120`
+- `formal_matrix_loss_120s.json`
+  - 486 组 loss 扩展矩阵
+  - 在 baseline 基础上加入 `loss = [0, 1, 2]`
+
+#### B. dry-run 检查结果
+
+执行命令：
+
+```bash
+cd /home/hellodaniel0/has-quicgo
+python3 scripts/run_experiment_matrix.py configs/formal_matrix_pilot_120s.json --dry-run
+python3 scripts/run_experiment_matrix.py configs/formal_matrix_baseline_120s.json --dry-run
+python3 scripts/run_experiment_matrix.py configs/formal_matrix_loss_120s.json --dry-run
+```
+
+结果：
+
+- pilot 矩阵：`6` 组
+- baseline 矩阵：`162` 组
+- loss 扩展矩阵：`486` 组
+
+dry-run 展开正常。
+
+#### C. 当前内容时长检查
+
+检查当前 has-quicgo 可用 MPD：
+
+```text
+/home/hellodaniel0/has-quicgo/assets/public/moi.mpd
+/home/hellodaniel0/has-quicgo/assets/public/test.mpd
+```
+
+结果：
+
+- `moi.mpd`: `PT12S`
+- `test.mpd`: `PT0H0M12.000S`
+
+结论：
+
+- 当前可用内容最大播放时长约为 `12s`
+- 这与正式实验计划中的 `streamDuration=120/180` 不匹配
+
+#### D. 120s pilot 执行结果
+
+执行命令：
+
+```bash
+cd /home/hellodaniel0/has-quicgo
+sudo python3 scripts/run_experiment_matrix.py configs/formal_matrix_pilot_120s.json
+```
+
+batch 目录：
+
+```text
+/home/hellodaniel0/has-quicgo/results/batch_runs/formal-pilot-direct-masque-qoe-120s-20260423-142621
+```
+
+runner 记录：
+
+- `6/6` 显示为 success
+- `direct / masque` 均启动
+- `conventional / bba2 / elastic` 均可被命令行接受
+
+但进一步检查 `batch.log` 后发现，goDASH 输出：
+
+```text
+*** -streamDuration, 120 seconds, must not be larger than the maximum MPD stream duration of 12 second ***
+```
+
+对应结果：
+
+- pilot 没有生成有效的 `logDownload.txt`
+- `formal_pilot_120s_per_run.csv` 只有 `runs.csv` 元数据
+- 无法提取 `video_tunnelsetupms / QoE / segment completion` 等正式指标
+- 因此不能基于该 pilot 生成有效 QoE 对比图
+
+#### E. 当前结论
+
+当前正式 120s/180s 实验暂不能直接启动大矩阵。
+
+原因：
+
+- 实验系统和 direct / MASQUE transport 本身可用
+- 但当前 MPD 内容只有约 `12s`
+- `streamDuration=120/180` 与内容时长不匹配
+- runner 当前只看进程退出码，未识别 goDASH 的参数级失败提示
+
+因此：
+
+- 不应继续运行 `162` 组 baseline 或 `486` 组 loss 矩阵
+- 不应把该 120s pilot 结果作为正式 QoE 数据
+- 需要先准备足够长的 MPD / content，或临时把正式实验时长调整到不超过 `12s`
+
+#### F. 后续建议
+
+进入正式实验前应先完成以下准备：
+
+1. 准备至少 `120s` 的 DASH 内容与 MPD
+2. 确认服务端可通过 direct / MASQUE 下载完整长内容
+3. 用单组 direct / MASQUE 各跑一次 `streamDuration=120`
+4. 确认生成有效：
+   - `logDownload.txt`
+   - inner qlog
+   - MASQUE outer qlog
+   - QoE 字段
+5. 再运行 `formal_matrix_baseline_120s.json`
+
+若暂时没有长内容，可先继续使用当前 `12s` 内容做短测矩阵，但结论只能用于 transport pipeline 与短内容 baseline，不能作为正式长时 QoE 结果。
+
+### 29.16 当前 12s 内容下的 direct / MASQUE 正式前置实验
+
+#### A. 背景
+
+由于当前服务端可用 MPD 内容最大时长约为 `12s`，`streamDuration=120/180` 的正式长时实验暂时无法产生有效 QoE 数据。因此先基于当前内容执行 `12s` 实验组，用于验证正式矩阵、runner、归档、统计和绘图流程。
+
+该批次结论只代表当前 `12s` 内容下的短内容 baseline，不等价于后续 `120s/180s` 正式长时 QoE 结论。
+
+#### B. 新增 12s 实验配置
+
+新增配置文件：
+
+```text
+/home/hellodaniel0/has-quicgo/configs/formal_matrix_pilot_12s.json
+/home/hellodaniel0/has-quicgo/configs/formal_matrix_baseline_12s.json
+/home/hellodaniel0/has-quicgo/configs/formal_matrix_loss_12s.json
+```
+
+配置含义：
+
+- `formal_matrix_pilot_12s.json`: `6` 组，`direct / masque × conventional / bba2 / elastic × bw=5 × delay=30ms × loss=0 × iterations=1`
+- `formal_matrix_baseline_12s.json`: `162` 组，`direct / masque × conventional / bba2 / elastic × bw=3/5/10 × delay=10/30/60ms × loss=0 × iterations=3`
+- `formal_matrix_loss_12s.json`: `486` 组，在 baseline 基础上加入 `loss=0/1/2`，当前仅完成 dry-run，尚未执行整批 loss 矩阵
+
+#### C. dry-run 检查
+
+执行命令：
+
+```bash
+cd /home/hellodaniel0/has-quicgo
+python3 scripts/run_experiment_matrix.py configs/formal_matrix_pilot_12s.json --dry-run
+python3 scripts/run_experiment_matrix.py configs/formal_matrix_baseline_12s.json --dry-run
+python3 scripts/run_experiment_matrix.py configs/formal_matrix_loss_12s.json --dry-run
+```
+
+结果：
+
+- pilot: `total_runs=6`
+- baseline: `total_runs=162`
+- loss: `total_runs=486`
+
+结论：12s 矩阵展开正确，runner 可正确组合 `transport / ABR / bw / delay / loss / iterations`。
+
+#### D. 12s pilot 执行结果
+
+执行命令：
+
+```bash
+cd /home/hellodaniel0/has-quicgo
+sudo python3 scripts/run_experiment_matrix.py configs/formal_matrix_pilot_12s.json --stop-on-failure
+```
+
+批次目录：
+
+```text
+/home/hellodaniel0/has-quicgo/results/batch_runs/formal-current12-pilot-direct-masque-qoe-20260423-144317
+```
+
+结果：
+
+- `6/6` 成功
+- direct / MASQUE 均成功
+- `conventional / bba2 / elastic` 均成功
+- 可正常生成 `logDownload.txt`
+- MASQUE 日志中出现有效字段：`TransportMode=masque`、`InnerProtocol=HTTP/3.0`、`OuterProtocol=HTTP/3.0 CONNECT-UDP`、`TunnelSetupMs>0`、`TransportError=-`
+
+pilot 汇总输出：
+
+```text
+/home/hellodaniel0/has-quicgo/results/summaries/formal_current12_pilot_per_run.csv
+/home/hellodaniel0/has-quicgo/results/summaries/formal_current12_pilot_aggregated.csv
+/home/hellodaniel0/has-quicgo/results/visualizations/formal_current12_pilot/
+```
+
+#### E. 12s baseline 执行结果
+
+执行命令：
+
+```bash
+cd /home/hellodaniel0/has-quicgo
+sudo python3 scripts/run_experiment_matrix.py configs/formal_matrix_baseline_12s.json --stop-on-failure
+```
+
+批次目录：
+
+```text
+/home/hellodaniel0/has-quicgo/results/batch_runs/formal-current12-baseline-direct-masque-qoe-20260423-144519
+```
+
+结果：
+
+- `162/162` 成功
+- direct / MASQUE 均成功
+- `conventional / bba2 / elastic` 均成功
+- `bw = 3 / 5 / 10 Mbps` 均成功
+- `delay = 10 / 30 / 60 ms` 均成功
+- `loss = 0`
+- 每组均完成归档
+
+baseline 汇总输出：
+
+```text
+/home/hellodaniel0/has-quicgo/results/summaries/formal_current12_baseline_per_run.csv
+/home/hellodaniel0/has-quicgo/results/summaries/formal_current12_baseline_aggregated.csv
+/home/hellodaniel0/has-quicgo/results/visualizations/formal_current12_baseline/
+```
+
+#### F. 绘图口径修正
+
+发现问题：原 `05_qoe_by_abr.png` 只按 ABR 汇总 QoE，没有把 `transport=direct/masque` 作为对照维度，因此不能回答“有无 QUIC 隧道对 QoE 的影响”。
+
+最小修正：
+
+- 修改 `/home/hellodaniel0/has-quicgo/scripts/plot_matrix_summary.py`
+- `TunnelSetupMs` 图不再硬编码 `20ms / 50ms`
+- QoE 图改为 `ABR × transport` 分组柱状图
+- 新的 `05_qoe_by_abr.png` 已可直接比较 direct 与 MASQUE 的 QoE 表现
+
+重新生成图片命令：
+
+```bash
+cd /home/hellodaniel0/has-quicgo
+python3 scripts/plot_matrix_summary.py \
+  --per-run results/summaries/formal_current12_baseline_per_run.csv \
+  --aggregated results/summaries/formal_current12_baseline_aggregated.csv \
+  --output-dir results/visualizations/formal_current12_baseline
+```
+
+核心图片：
+
+```text
+results/visualizations/formal_current12_baseline/01_tunnel_setup_by_delay.png
+results/visualizations/formal_current12_baseline/02_network_effect_video_del_time.png
+results/visualizations/formal_current12_baseline/03_network_effect_video_del_rate.png
+results/visualizations/formal_current12_baseline/04_network_effect_video_rtt.png
+results/visualizations/formal_current12_baseline/05_qoe_by_abr.png
+results/visualizations/formal_current12_baseline/06_qlog_coverage.png
+results/visualizations/formal_current12_baseline/07_transport_error_rate.png
+```
+
+其中：
+
+- `01_tunnel_setup_by_delay.png`: 比较 direct / MASQUE 的 TunnelSetupMs
+- `05_qoe_by_abr.png`: 比较 direct / MASQUE 在不同 ABR 下的 QoE
+- `06_qlog_coverage.png`: 检查 inner / outer qlog 覆盖
+- `07_transport_error_rate.png`: 检查 TransportError 是否出现
+
+#### G. 12s baseline 关键统计结果
+
+基于：
+
+```text
+/home/hellodaniel0/has-quicgo/results/summaries/formal_current12_baseline_per_run.csv
+```
+
+样本数：
+
+- 成功 runs: `162`
+- direct: `81`
+- MASQUE: `81`
+
+QoE 按 transport 汇总：
+
+```text
+transport   P.1203   Clae    Duanmu    Yin       Yu
+direct      0.000    0.241   49.550    3637.035  0.659
+masque      0.000    0.241   49.535    3624.535  0.657
+```
+
+QoE 按 `ABR × transport` 汇总：
+
+```text
+ABR           transport   P.1203   Clae    Duanmu    Yin       Yu
+bba2          direct      0.000    0.246   48.456    3133.632  0.522
+bba2          masque      0.000    0.246   48.456    3133.632  0.522
+conventional  direct      0.000    0.230   51.737    4643.840  0.934
+conventional  masque      0.000    0.230   51.694    4606.340  0.928
+elastic       direct      0.000    0.246   48.456    3133.632  0.522
+elastic       masque      0.000    0.246   48.456    3133.632  0.522
+```
+
+TunnelSetupMs 按 `transport × delay` 汇总：
+
+```text
+transport   delay   avg TunnelSetupMs
+direct      10ms    0.0
+direct      30ms    0.0
+direct      60ms    0.0
+masque      10ms    95.9
+masque      30ms    257.6
+masque      60ms    501.9
+```
+
+网络指标按 transport 汇总：
+
+```text
+transport   video_del_time   video_del_rate   video_rtt
+direct      452.69           3589.93          135.69
+masque      460.60           3522.94          136.99
+```
+
+qlog 覆盖：
+
+```text
+transport   inner qlog   outer qlog
+direct      100%         0%
+masque      100%         100%
+```
+
+TransportError：
+
+```text
+direct:  -
+masque:  -
+```
+
+#### H. 当前结论
+
+当前 `12s / loss=0` baseline 下：
+
+1. direct 与 MASQUE 都可以稳定完成实验矩阵
+2. MASQUE 的主要额外开销体现在 `TunnelSetupMs`
+3. `TunnelSetupMs` 随 delay 明显增加
+4. 当前短内容实验中，direct 与 MASQUE 的 QoE 差异很小
+5. `conventional` 在当前 12s 数据中 QoE 指标略高于 `bba2 / elastic`
+6. `bba2` 与 `elastic` 在当前输出上表现几乎一致
+7. MASQUE 下 outer qlog 稳定产出
+8. 当前成功 runs 中未观察到 TransportError
+
+限制：
+
+- 当前结果是 `12s` 短内容结果
+- `loss=1/2` 的 12s loss 矩阵尚未执行
+- 该结果不能替代未来 `120s/180s` 长内容正式 QoE 实验
+
+#### I. 下一步建议
+
+建议下一步按以下顺序继续：
+
+1. 先检查 `formal_current12_baseline` 图片是否满足论文图表口径
+2. 再执行较小 loss smoke，而不是直接跑完整 `486` 组 loss 矩阵
+3. loss smoke 稳定后，再决定是否执行完整 `formal_matrix_loss_12s.json`
+4. 后续准备 `120s+` 内容后，再迁移同一矩阵结构到正式长内容实验
+
+## 30. QoE对比实验说明
+### 30.11 丢包扫
+## 丢包扫 
+
+transport=direct/masque，abr=conventional/bba2/elastic，bw=5，delay=30ms，
+     loss=[0,0.1,0.2,0.3,0.5,0.7,1.0]，iterations=5，stream_duration=120（共 210 组）。
+
+  cd /home/hellodaniel0/has-quicgo
+
+**1) 清理 Mininet 残留**
+
+  sudo mn -c
+  sudo pkill -f "mininet|mnexec|topo_test.py|run_experiment_matrix.py" || true
+
+**2) 保险起见，把这对残留接口删掉（存在才删）**
+
+  sudo ip link del h2-eth0 2>/dev/null || true
+  sudo ip link del s1-eth2 2>/dev/null || true
+
+**3) 重新跑丢包扫**
+
+  sudo python3 scripts/run_experiment_matrix.py configs/formal_output_c_loss_sweep_120s.json --stop-on-failure
+
+### 30.11.1 Pensieve 丢包扫
+
+这组和上面的 `conventional / bba2 / elastic` 不同，`pensieve` 依赖本机先启动官方 `rl_server` 推理服务。
+
+配置文件：
+
+- `configs/formal_output_c_loss_sweep_120s_pensieve.json`
+
+矩阵含义：
+
+- transport=`direct/masque`
+- abr=`pensieve`
+- bw=`5`
+- delay=`30ms`
+- loss=`[0,0.1,0.2,0.3,0.5,0.7,1.0]`
+- iterations=`5`
+- stream_duration=`120`
+- 总组数：`2 x 1 x 1 x 1 x 7 x 5 = 70 runs`
+
+#### A. Pensieve 服务启动前置
+
+Pensieve 服务目录：
+
+- `/home/hellodaniel0/cross-nossdav-go/paper-utilities/pensieve/rl_server`
+
+本机使用的 Python 解释器：
+
+- `/home/hellodaniel0/.local/miniforge3-pensieve/envs/pensieve-py38/bin/python`
+
+如果还没装过依赖，先参考前面记录完成 `Miniforge + pensieve-py38` 安装。当前这轮实验实际使用的是：
+
+- `tensorflow==2.7.0`
+- `tflearn==0.5.0`
+- `protobuf<3.21`
+- `Pillow<10`
+
+#### B. 启动 Pensieve 推理服务
+
+执行命令：
+
+```bash
+cd /home/hellodaniel0/cross-nossdav-go/paper-utilities/pensieve/rl_server
+rm -f /tmp/pensieve.log /tmp/pensieve.pid
+(nohup /home/hellodaniel0/.local/miniforge3-pensieve/envs/pensieve-py38/bin/python rl_server_no_training.py </dev/null > /tmp/pensieve.log 2>&1 & echo $! > /tmp/pensieve.pid)
+sleep 8
+cat /tmp/pensieve.pid
+```
+
+说明：
+
+- 服务默认监听 `127.0.0.1:8333`
+- 日志写到 `/tmp/pensieve.log`
+- PID 写到 `/tmp/pensieve.pid`
+
+#### C. 探活
+
+启动后必须先探活，确认 `rl_server` 可以返回 `0` 到 `5` 之间的动作编号。
+
+探活命令：
+
+```bash
+curl -sS -X POST http://127.0.0.1:8333 \
+  -H 'Content-Type: application/json' \
+  -d '{"lastquality":0,"buffer":4.0,"RebufferTime":0.0,"lastChunkStartTime":0.0,"lastChunkFinishTime":800.0,"lastChunkSize":500000.0,"lastRequest":1}'
+```
+
+判定标准：
+
+- 返回 `0`、`1`、`2`、`3`、`4`、`5` 中任意一个数字即可
+
+如需连续探两次，可直接重复执行一次，或查看日志：
+
+```bash
+tail -n 40 /tmp/pensieve.log
+```
+
+#### D. 跑 Pensieve 丢包扫前的清理
+
+执行目录：
+
+```bash
+cd /home/hellodaniel0/has-quicgo
+```
+
+清理命令：
+
+```bash
+sudo mn -c
+sudo pkill -f "mininet|mnexec|topo_test.py|run_experiment_matrix.py" || true
+sudo ip link del h2-eth0 2>/dev/null || true
+sudo ip link del s1-eth2 2>/dev/null || true
+```
+
+#### E. 正式执行 Pensieve 丢包扫
+
+执行命令：
+
+```bash
+cd /home/hellodaniel0/has-quicgo
+sudo python3 scripts/run_experiment_matrix.py configs/formal_output_c_loss_sweep_120s_pensieve.json --stop-on-failure
+//跨层丢包扫
+sudo python3 scripts/run_experiment_matrix.py configs/formal_output_c_loss_sweep_120s_crosslayer.json --stop-on-failure
+```
+补充说明：
+
+- `godash` 默认会把 Pensieve 服务地址当成 `http://127.0.0.1:8333`
+- 当前 `topo_test.py` / matrix runner 没有额外覆盖 `-pensieveServer`，因此本机服务必须先在 `127.0.0.1:8333` 正常起来
+- 如果服务没起来，客户端侧通常会出现 `pensieve service request failed` 或 reset/predict 失败
+
+## 时延扫  
+
+配置文件 configs/formal_output_c_delay_sweep_120s.json
+
+1. 固定项
+
+  - transport: ["direct", "masque"]
+  - abr: ["conventional", "bba2", "elastic"]
+  - bw: [5] Mbps
+  - loss: [0]
+  - stream_duration: 120
+  - iterations: 5
+
+    2. 时延档位（建议）
+
+  - delay: ["10ms", "20ms", "30ms", "40ms", "60ms", "80ms", "100ms"]
+
+    3. 总组数
+
+  - 2 × 3 × 7 × 5 = 210 runs
+
+  cd /home/hellodaniel0/has-quicgo
+  sudo python3 scripts/run_experiment_matrix.py configs/
+  formal_output_c_delay_sweep_120s.json --stop-on-failure

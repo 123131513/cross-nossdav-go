@@ -111,6 +111,51 @@ func GetLastTransportError() string {
 	return errMsg
 }
 
+func transportMetricOrDash(value string) string {
+	if value == "" {
+		return "-"
+	}
+	return value
+}
+
+func GetTunnelRetrans() string {
+	return transportMetricOrDash(transport.SnapshotState().TunnelMetrics.Retrans)
+}
+
+func GetTunnelRetransRate() string {
+	return transportMetricOrDash(transport.SnapshotState().TunnelMetrics.RetransRate)
+}
+
+func GetTunnelQueueBytes() string {
+	return transportMetricOrDash(transport.SnapshotState().TunnelMetrics.QueueBytes)
+}
+
+func GetTunnelBwEstimate() string {
+	return transportMetricOrDash(transport.SnapshotState().TunnelMetrics.BwEstimate)
+}
+
+func GetTunnelTargetRate() string {
+	return transportMetricOrDash(transport.SnapshotState().TunnelMetrics.TargetRate)
+}
+
+func GetTunnelFeedbackRTT() string {
+	return transportMetricOrDash(transport.SnapshotState().TunnelMetrics.FeedbackRTT)
+}
+
+func GetServerSendRate() string {
+	return transportMetricOrDash(transport.SnapshotState().TunnelMetrics.ServerSendRate)
+}
+
+func GetTunnelForwardRate() string {
+	return transportMetricOrDash(transport.SnapshotState().TunnelMetrics.TunnelForwardRate)
+}
+
+func RefreshTransportMetrics(ctx context.Context) {
+	if refresher, ok := activeBackend.(interface{ RefreshMetrics(context.Context) }); ok {
+		refresher.RefreshMetrics(ctx)
+	}
+}
+
 // getHTTPClient:
 func GetHTTPClient(quicBool bool, debugFile string, debugLog bool, useTestbedBool bool) (*http.Transport, *http.Client, *http3.Transport) {
 	var err error
@@ -258,6 +303,7 @@ func getURLBody(url string, isByteRangeMPD bool, startRange int, endRange int, q
 	// get protocol version
 	protocol := activeBackend.ProtocolLabel(resp.Proto)
 	status := resp.StatusCode
+	transport.ObserveHTTPResponse(resp)
 
 	logging.DebugPrint(debugFile, debugLog, "DEBUG: ", "URL is : "+url)
 	logging.DebugPrint(debugFile, debugLog, "DEBUG: ", "Protocol is : "+protocol)
@@ -556,6 +602,7 @@ func GetFile(currentURL string, fileBaseURL string, fileLocation string, isByteR
 	}
 
 	abrqlog.MainTracer.RequestUpdate(urlHeaderString, int64(segSize))
+	RefreshTransportMetrics(ctx)
 
 	// get the P.1203 segSize (less the header)
 	withoutHeaderVal := int64(segSize)

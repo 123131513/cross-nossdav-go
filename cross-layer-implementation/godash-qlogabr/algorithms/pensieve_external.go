@@ -108,7 +108,8 @@ func (c *PensieveExternalClient) SelectBitrate(
 		return 0, err
 	}
 
-	req, err := http.NewRequest(http.MethodPost, c.ServerURL+"/predict", bytes.NewReader(body))
+	// The official Pensieve rl_server_no_training.py serves predictions on the root path.
+	req, err := http.NewRequest(http.MethodPost, c.ServerURL, bytes.NewReader(body))
 	if err != nil {
 		return 0, err
 	}

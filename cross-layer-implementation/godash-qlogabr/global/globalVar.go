@@ -122,6 +122,7 @@ const ArbiterAlg = "arbiter"
 const MeanAverageXLAlg = "averageXL"
 const MeanAverageRecentXLAlg = "averageRecentXL"
 const PensieveAlg = "pensieve"
+const PensieveXLAlg = "pensieveXL"
 const PensieveServerName = "pensieveServer"
 
 // HlsOff : constants for HLS
@@ -217,8 +218,32 @@ const TransportDirect = "direct"
 // TransportMasque : MASQUE CONNECT-UDP transport
 const TransportMasque = "masque"
 
+// TransportMDT : MASQUE Datagram Tunnel transport
+const TransportMDT = "mdt"
+
+// TransportMST : MASQUE Stream Tunnel transport
+const TransportMST = "mst"
+
+// TransportMFT : MASQUE Forwarding Tunnel transport
+const TransportMFT = "mft"
+
+// TransportRMDT : retransmission-enabled MASQUE Datagram Tunnel transport
+const TransportRMDT = "rmdt"
+
+// TransportRMDTBBR : RMDT with tunnel-side congestion-control experiment label
+const TransportRMDTBBR = "rmdt-bbr"
+
+// TransportTECC : collaborative TECC transport
+const TransportTECC = "tecc"
+
 // MasqueProxyTemplateName : parameter variables
 const MasqueProxyTemplateName = "masqueProxyTemplate"
+
+// TECCProxyDebugURLName : parameter variables
+const TECCProxyDebugURLName = "teccProxyDebugURL"
+
+// TECCFeedbackForwardURLName : parameter variables
+const TECCFeedbackForwardURLName = "teccFeedbackForwardURL"
 
 // AppName : parameter variables
 const AppName = "goDASH"
@@ -371,6 +396,30 @@ const OuterProtocolHeader = "OuterProtocol"
 
 // TunnelSetupMsHeader : header for
 const TunnelSetupMsHeader = "TunnelSetupMs"
+
+// TunnelRetransHeader : header for
+const TunnelRetransHeader = "TunnelRetrans"
+
+// TunnelRetransRateHeader : header for
+const TunnelRetransRateHeader = "TunnelRetransRate"
+
+// TunnelQueueBytesHeader : header for
+const TunnelQueueBytesHeader = "TunnelQueueBytes"
+
+// TunnelBwEstimateHeader : header for
+const TunnelBwEstimateHeader = "TunnelBwEstimate"
+
+// TunnelTargetRateHeader : header for
+const TunnelTargetRateHeader = "TunnelTargetRate"
+
+// TunnelFeedbackRTTHeader : header for
+const TunnelFeedbackRTTHeader = "TunnelFeedbackRTT"
+
+// ServerSendRateHeader : header for
+const ServerSendRateHeader = "ServerSendRate"
+
+// TunnelForwardRateHeader : header for
+const TunnelForwardRateHeader = "TunnelForwardRate"
 
 // TransportErrorHeader : header for
 const TransportErrorHeader = "TransportError"

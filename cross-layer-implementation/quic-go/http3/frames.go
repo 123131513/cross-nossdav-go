@@ -88,7 +88,8 @@ func (f *headersFrame) Append(b []byte) []byte {
 	return quicvarint.Append(b, f.Length)
 }
 
-const settingDatagram = 0xffd277
+// RFC 9297 SETTINGS_H3_DATAGRAM
+const settingDatagram = 0x33
 
 type settingsFrame struct {
 	Datagram bool

@@ -23,23 +23,33 @@ const (
 )
 
 type MasqueBackend struct {
-	cfg           Config
-	direct        *DirectBackend
-	client        *http.Client
-	trQuic        *http3.Transport
-	masqueClient  *masque.Client
-	proxyTemplate *uritemplate.Template
+	cfg             Config
+	mode            string
+	enableMST       bool
+	enableRMDT      bool
+	enableFeedback  bool
+	tunnelCCEnabled bool
+	direct          *DirectBackend
+	client          *http.Client
+	trQuic          *http3.Transport
+	masqueClient    *masque.Client
+	proxyTemplate   *uritemplate.Template
+	feedbackSource  teccFeedbackSource
 }
 
 func NewMasqueBackend(cfg Config) *MasqueBackend {
 	return &MasqueBackend{
 		cfg:    cfg,
+		mode:   ModeMasque,
 		direct: NewDirectBackend(),
 	}
 }
 
 func (b *MasqueBackend) Mode() string {
-	return ModeMasque
+	if b.mode == "" {
+		return ModeMasque
+	}
+	return b.mode
 }
 
 func (b *MasqueBackend) ProtocolLabel(protocol string) string {
@@ -60,6 +70,7 @@ func (b *MasqueBackend) GetHTTPClient(quicBool bool, debugFile string, debugLog 
 	if !quicBool {
 		return b.direct.GetHTTPClient(quicBool, debugFile, debugLog, useTestbedBool)
 	}
+	SetTunnelMetrics(TunnelMetrics{})
 	if b.client != nil {
 		return nil, b.client, b.trQuic, nil
 	}
@@ -100,7 +111,11 @@ func (b *MasqueBackend) GetHTTPClient(quicBool bool, debugFile string, debugLog 
 			InsecureSkipVerify: b.cfg.MasqueInsecure,
 			NextProtos:         []string{http3.NextProtoH3},
 		},
-		QUICConfig: &outerQconf,
+		QUICConfig:             &outerQconf,
+		EnableMST:              b.enableMST,
+		EnableRMDT:             b.enableRMDT,
+		EnableTECCFeedback:     b.enableFeedback,
+		TECCFeedbackForwardURL: b.cfg.TECCFeedbackForwardURL,
 	}
 
 	innerQconf := buildInnerQuicConfig()
@@ -133,6 +148,9 @@ func (b *MasqueBackend) GetHTTPClient(quicBool bool, debugFile string, debugLog 
 		if SnapshotState().OuterProtocol == "" {
 			SetOuterProtocol("HTTP/3.0 CONNECT-UDP")
 		}
+		if source, ok := pconn.(teccFeedbackSource); ok {
+			b.feedbackSource = source
+		}
 
 		if quicConf == nil {
 			quicConf = &quic.Config{}
@@ -151,4 +169,36 @@ func (b *MasqueBackend) GetHTTPClient(quicBool bool, debugFile string, debugLog 
 
 	b.client = &http.Client{Transport: b.trQuic}
 	return nil, b.client, b.trQuic, nil
+}
+
+func (b *MasqueBackend) RefreshMetrics(ctx context.Context) {
+	if b.feedbackSource != nil {
+		if frame, ok := b.feedbackSource.TECCFeedbackSnapshot(); ok {
+			UpdateTunnelMetrics(tunnelMetricsFromTECCFeedback(frame))
+		}
+	}
+	if err := RefreshTunnelMetricsFromProxyDebug(ctx, b.cfg.TECCProxyDebugURL); err != nil {
+		SetLastError(err)
+	}
+}
+
+type teccFeedbackSource interface {
+	TECCFeedbackSnapshot() (masque.TunnelFeedbackFrame, bool)
+}
+
+func tunnelMetricsFromTECCFeedback(frame masque.TunnelFeedbackFrame) TunnelMetrics {
+	forwardRate := firstNonZeroUint64(frame.TrTBps, frame.SendRateBps)
+	queue := firstNonZeroUint64(frame.QTPackets, frame.QueuePackets)
+	rtt := firstNonZeroUint64(frame.TTMicros, frame.MinRTTMicros)
+	retransPPM := firstNonZeroUint64(frame.RTPPM, frame.RetransmissionRatePPM)
+	out := TunnelMetrics{
+		QueueBytes:        fmt.Sprintf("%d", estimatedTunnelQueueBytes(queue)),
+		BwEstimate:        fmt.Sprintf("%d", forwardRate),
+		TunnelForwardRate: fmt.Sprintf("%d", forwardRate),
+		FeedbackRTT:       fmt.Sprintf("%d", rtt),
+	}
+	if retransPPM > 0 {
+		out.RetransRate = fmt.Sprintf("%.6f", float64(retransPPM)/1_000_000.0)
+	}
+	return out
 }

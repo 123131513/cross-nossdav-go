@@ -68,6 +68,14 @@ type SegPrintLogInformation struct {
 	InnerProtocol        string
 	OuterProtocol        string
 	TunnelSetupMs        int
+	TunnelRetrans        string
+	TunnelRetransRate    string
+	TunnelQueueBytes     string
+	TunnelBwEstimate     string
+	TunnelTargetRate     string
+	TunnelFeedbackRTT    string
+	ServerSendRate       string
+	TunnelForwardRate    string
 	TransportError       string
 	Clae                 float64
 	Duanmu               float64
@@ -112,6 +120,14 @@ const transportModeHeader = glob.TransportModeHeader
 const innerProtocolHeader = glob.InnerProtocolHeader
 const outerProtocolHeader = glob.OuterProtocolHeader
 const tunnelSetupMsHeader = glob.TunnelSetupMsHeader
+const tunnelRetransHeader = glob.TunnelRetransHeader
+const tunnelRetransRateHeader = glob.TunnelRetransRateHeader
+const tunnelQueueBytesHeader = glob.TunnelQueueBytesHeader
+const tunnelBwEstimateHeader = glob.TunnelBwEstimateHeader
+const tunnelTargetRateHeader = glob.TunnelTargetRateHeader
+const tunnelFeedbackRTTHeader = glob.TunnelFeedbackRTTHeader
+const serverSendRateHeader = glob.ServerSendRateHeader
+const tunnelForwardRateHeader = glob.TunnelForwardRateHeader
 const transportErrorHeader = glob.TransportErrorHeader
 
 // QOE
@@ -216,12 +232,12 @@ func PrintsegInformationLogMap(debugFile string, debugLog bool, mapSegments map[
 
 	// print map header
 	mainPrintString := "%7s  %10s  %8s  %12s  %8s  %12s  %8s  %8s  %10s"
-	extendPrintString := "  %12s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s\n"
-	PrintToFile("seg_Num", "size", "downTime", "thr", "duration", "playbackTime", "repIndex", "MPDIndex", "adaptIndex", "bandwith", "", true, "", "", "", "", "", "", mainPrintString, extendPrintString, debugFile, "", "", "", "", "", "", "", "", "", "", "", "")
+	extendPrintString := "  %12s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s\n"
+	PrintToFile("seg_Num", "size", "downTime", "thr", "duration", "playbackTime", "repIndex", "MPDIndex", "adaptIndex", "bandwith", "", true, "", "", "", "", "", "", mainPrintString, extendPrintString, debugFile, "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "")
 
 	for k := 1; k <= len(mapSegments); k++ {
 		// print out each segment map
-		PrintToFile(strconv.Itoa(k), strconv.Itoa(mapSegments[k].SegSize), strconv.Itoa(mapSegments[k].DeliveryTime), strconv.Itoa(mapSegments[k].DelRate), strconv.Itoa(mapSegments[k].SegmentDuration*glob.Conversion1000), strconv.Itoa(mapSegments[k].PlaybackTime), strconv.Itoa(mapSegments[k].RepIndex), strconv.Itoa(mapSegments[k].MpdIndex), strconv.Itoa(mapSegments[k].AdaptIndex), strconv.Itoa(mapSegments[k].Bandwidth), "", true, "", "", "", "", "", "", mainPrintString, extendPrintString, debugFile, "", "", "", "", "", "", "", "", "", "", "", "")
+		PrintToFile(strconv.Itoa(k), strconv.Itoa(mapSegments[k].SegSize), strconv.Itoa(mapSegments[k].DeliveryTime), strconv.Itoa(mapSegments[k].DelRate), strconv.Itoa(mapSegments[k].SegmentDuration*glob.Conversion1000), strconv.Itoa(mapSegments[k].PlaybackTime), strconv.Itoa(mapSegments[k].RepIndex), strconv.Itoa(mapSegments[k].MpdIndex), strconv.Itoa(mapSegments[k].AdaptIndex), strconv.Itoa(mapSegments[k].Bandwidth), "", true, "", "", "", "", "", "", mainPrintString, extendPrintString, debugFile, "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "")
 	}
 	// }
 }
@@ -230,7 +246,7 @@ func PrintsegInformationLogMap(debugFile string, debugLog bool, mapSegments map[
 // * print a line to the file logDownload
 func PrintToFile(segNum string, arrTime string, delTime string, stallDur string,
 	repLevel string, delRate string, actRate string, byteSize string,
-	buffLevel string, algo string, segDuration string, extendPrintLog bool, codec string, width string, height string, fps string, playHeader string, rttHeader string, mainPrintString string, extendPrintString string, fileLocation string, segReplace string, httpProtocol string, transportMode string, innerProtocol string, outerProtocol string, tunnelSetupMs string, p1203 string, clae string, duanmu string, yin string, yu string, transportError string) {
+	buffLevel string, algo string, segDuration string, extendPrintLog bool, codec string, width string, height string, fps string, playHeader string, rttHeader string, mainPrintString string, extendPrintString string, fileLocation string, segReplace string, httpProtocol string, transportMode string, innerProtocol string, outerProtocol string, tunnelSetupMs string, tunnelRetrans string, tunnelRetransRate string, tunnelQueueBytes string, tunnelBwEstimate string, tunnelTargetRate string, tunnelFeedbackRTT string, serverSendRate string, tunnelForwardRate string, p1203 string, clae string, duanmu string, yin string, yu string, transportError string) {
 
 	// open the logfile and print to it
 	f, err := os.OpenFile(fileLocation, os.O_APPEND|os.O_WRONLY, 0644)
@@ -246,7 +262,7 @@ func PrintToFile(segNum string, arrTime string, delTime string, stallDur string,
 
 	if extendPrintLog {
 		//fmt.Fprint(f, algo+"\t"+segDuration+"\t"+codec+"\t"+height+"\t"+width+"\t"+fps+"\t"+playHeader+"\t"+rttHeader+"\t\n")
-		fmt.Fprintf(f, extendPrintString, algo, segDuration, codec, width, height, fps, playHeader, rttHeader, segReplace, httpProtocol, transportMode, innerProtocol, outerProtocol, tunnelSetupMs, p1203, clae, duanmu, yin, yu, transportError)
+		fmt.Fprintf(f, extendPrintString, algo, segDuration, codec, width, height, fps, playHeader, rttHeader, segReplace, httpProtocol, transportMode, innerProtocol, outerProtocol, tunnelSetupMs, tunnelRetrans, tunnelRetransRate, tunnelQueueBytes, tunnelBwEstimate, tunnelTargetRate, tunnelFeedbackRTT, serverSendRate, tunnelForwardRate, p1203, clae, duanmu, yin, yu, transportError)
 	} else {
 		fmt.Fprint(f, "\n")
 	}
@@ -268,17 +284,17 @@ func PrintHeaders(extendPrintLog bool, fileLocation string, logDownload string, 
 
 	// print a line of the log file to terminal
 	PrintLog(segNum, arrTime, delTime, stallDur, repLevel, delRate, actRate,
-		byteSize, buffLevel, algoHeader, segDurHeader, extendPrintLog, codecHeader, heightHeader, widthHeader, fpsHeader, playHeader, rttHeader, fileLocation, logDownload, printLog, printHeadersData, segReplaceHeader, httpProtocolHeader, transportModeHeader, innerProtocolHeader, outerProtocolHeader, tunnelSetupMsHeader, p1203Header, claeHeader, duanmuHeader, yinHeader, yuHeader, transportErrorHeader)
+		byteSize, buffLevel, algoHeader, segDurHeader, extendPrintLog, codecHeader, heightHeader, widthHeader, fpsHeader, playHeader, rttHeader, fileLocation, logDownload, printLog, printHeadersData, segReplaceHeader, httpProtocolHeader, transportModeHeader, innerProtocolHeader, outerProtocolHeader, tunnelSetupMsHeader, tunnelRetransHeader, tunnelRetransRateHeader, tunnelQueueBytesHeader, tunnelBwEstimateHeader, tunnelTargetRateHeader, tunnelFeedbackRTTHeader, serverSendRateHeader, tunnelForwardRateHeader, p1203Header, claeHeader, duanmuHeader, yinHeader, yuHeader, transportErrorHeader)
 }
 
 // PrintLog :
 // * print a line to the output log
 func PrintLog(segNum string, arrTime string, delTime string, stallDur string,
 	repLevel string, delRate string, actRate string, byteSize string,
-	buffLevel string, algoIn string, segDurationIn string, extendPrintLog bool, codecIn string, widthIn string, heightIn string, fpsIn string, playIn string, rttIn string, fileLocation string, logDownload string, printLog bool, printHeadersData map[string]string, segReplaceIn string, httpProtocolIn string, transportModeIn string, innerProtocolIn string, outerProtocolIn string, tunnelSetupMsIn string, p1203In string, claeIn string, duanmuIn string, yinIn string, yuIn string, transportErrorIn string) {
+	buffLevel string, algoIn string, segDurationIn string, extendPrintLog bool, codecIn string, widthIn string, heightIn string, fpsIn string, playIn string, rttIn string, fileLocation string, logDownload string, printLog bool, printHeadersData map[string]string, segReplaceIn string, httpProtocolIn string, transportModeIn string, innerProtocolIn string, outerProtocolIn string, tunnelSetupMsIn string, tunnelRetransIn string, tunnelRetransRateIn string, tunnelQueueBytesIn string, tunnelBwEstimateIn string, tunnelTargetRateIn string, tunnelFeedbackRTTIn string, serverSendRateIn string, tunnelForwardRateIn string, p1203In string, claeIn string, duanmuIn string, yinIn string, yuIn string, transportErrorIn string) {
 
 	const mainPrintString = "%10s   %10s   %10s   %10s   %10s   %10s   %10s   %10s   %10s"
-	const fileExtendPrintString = "   %12s   %7s   %5s   %5s   %6s   %5s   %8s   %8s   %8s   %8s   %14s   %14s   %14s   %18s   %8s   %8s   %12s   %12s   %12s   %18s\n"
+	const fileExtendPrintString = "   %12s   %7s   %5s   %5s   %6s   %5s   %8s   %8s   %8s   %8s   %14s   %14s   %14s   %18s   %14s   %18s   %18s   %18s   %18s   %18s   %18s   %18s   %8s   %8s   %12s   %12s   %12s   %18s\n"
 	var extendPrintString = ""
 	const fiveString = "   %5s"
 	const eightString = "   %8s"
@@ -299,6 +315,14 @@ func PrintLog(segNum string, arrTime string, delTime string, stallDur string,
 	var innerProtocol = ""
 	var outerProtocol = ""
 	var tunnelSetupMs = ""
+	var tunnelRetrans = ""
+	var tunnelRetransRate = ""
+	var tunnelQueueBytes = ""
+	var tunnelBwEstimate = ""
+	var tunnelTargetRate = ""
+	var tunnelFeedbackRTT = ""
+	var serverSendRate = ""
+	var tunnelForwardRate = ""
 	var clae = ""
 	var duanmu = ""
 	var yin = ""
@@ -328,6 +352,14 @@ func PrintLog(segNum string, arrTime string, delTime string, stallDur string,
 			checkInputHeader(printHeadersData, innerProtocolHeader, &extendPrintString, fourteenString, &innerProtocol, innerProtocolIn)
 			checkInputHeader(printHeadersData, outerProtocolHeader, &extendPrintString, "   %18s", &outerProtocol, outerProtocolIn)
 			checkInputHeader(printHeadersData, tunnelSetupMsHeader, &extendPrintString, fourteenString, &tunnelSetupMs, tunnelSetupMsIn)
+			checkInputHeader(printHeadersData, tunnelRetransHeader, &extendPrintString, fourteenString, &tunnelRetrans, tunnelRetransIn)
+			checkInputHeader(printHeadersData, tunnelRetransRateHeader, &extendPrintString, "   %18s", &tunnelRetransRate, tunnelRetransRateIn)
+			checkInputHeader(printHeadersData, tunnelQueueBytesHeader, &extendPrintString, "   %18s", &tunnelQueueBytes, tunnelQueueBytesIn)
+			checkInputHeader(printHeadersData, tunnelBwEstimateHeader, &extendPrintString, "   %18s", &tunnelBwEstimate, tunnelBwEstimateIn)
+			checkInputHeader(printHeadersData, tunnelTargetRateHeader, &extendPrintString, "   %18s", &tunnelTargetRate, tunnelTargetRateIn)
+			checkInputHeader(printHeadersData, tunnelFeedbackRTTHeader, &extendPrintString, "   %18s", &tunnelFeedbackRTT, tunnelFeedbackRTTIn)
+			checkInputHeader(printHeadersData, serverSendRateHeader, &extendPrintString, "   %18s", &serverSendRate, serverSendRateIn)
+			checkInputHeader(printHeadersData, tunnelForwardRateHeader, &extendPrintString, "   %18s", &tunnelForwardRate, tunnelForwardRateIn)
 			checkInputHeader(printHeadersData, p1203Header, &extendPrintString, eightString, &p1203, p1203In)
 			checkInputHeader(printHeadersData, claeHeader, &extendPrintString, eightString, &clae, claeIn)
 			checkInputHeader(printHeadersData, duanmuHeader, &extendPrintString, twelveString, &duanmu, duanmuIn)
@@ -337,7 +369,7 @@ func PrintLog(segNum string, arrTime string, delTime string, stallDur string,
 
 			// one of these has to be true, so print a new line at the end
 			extendPrintString += "\n"
-			fmt.Printf(extendPrintString, algo, segDuration, codec, width, height, fps, play, rtt, segReplace, httpProtocol, transportMode, innerProtocol, outerProtocol, tunnelSetupMs, p1203, clae, duanmu, yin, yu, transportError)
+			fmt.Printf(extendPrintString, algo, segDuration, codec, width, height, fps, play, rtt, segReplace, httpProtocol, transportMode, innerProtocol, outerProtocol, tunnelSetupMs, tunnelRetrans, tunnelRetransRate, tunnelQueueBytes, tunnelBwEstimate, tunnelTargetRate, tunnelFeedbackRTT, serverSendRate, tunnelForwardRate, p1203, clae, duanmu, yin, yu, transportError)
 		} else {
 			fmt.Printf("\n")
 		}
@@ -345,7 +377,7 @@ func PrintLog(segNum string, arrTime string, delTime string, stallDur string,
 
 	printLocal := fileLocation + "/" + logDownload
 
-	PrintToFile(segNum, arrTime, delTime, stallDur, repLevel, delRate, actRate, byteSize, buffLevel, algoIn, segDurationIn, extendPrintLog, codecIn, widthIn, heightIn, fpsIn, playIn, rttIn, mainPrintString, fileExtendPrintString, printLocal, segReplaceIn, httpProtocolIn, transportModeIn, innerProtocolIn, outerProtocolIn, tunnelSetupMsIn, p1203In, claeIn, duanmuIn, yinIn, yuIn, transportErrorIn)
+	PrintToFile(segNum, arrTime, delTime, stallDur, repLevel, delRate, actRate, byteSize, buffLevel, algoIn, segDurationIn, extendPrintLog, codecIn, widthIn, heightIn, fpsIn, playIn, rttIn, mainPrintString, fileExtendPrintString, printLocal, segReplaceIn, httpProtocolIn, transportModeIn, innerProtocolIn, outerProtocolIn, tunnelSetupMsIn, tunnelRetransIn, tunnelRetransRateIn, tunnelQueueBytesIn, tunnelBwEstimateIn, tunnelTargetRateIn, tunnelFeedbackRTTIn, serverSendRateIn, tunnelForwardRateIn, p1203In, claeIn, duanmuIn, yinIn, yuIn, transportErrorIn)
 }
 
 func checkInputHeader(printHeadersData map[string]string, key string, extendPrintString *string, stringDuration string, val1 *string, val2 string) {
@@ -413,6 +445,14 @@ func PrintPlayOutLog(currentTime int, initBuffer int, mapSegments []map[int]SegP
 					mapSegments[logIndex][playoutSegmentNumber].InnerProtocol,
 					mapSegments[logIndex][playoutSegmentNumber].OuterProtocol,
 					strconv.Itoa(mapSegments[logIndex][playoutSegmentNumber].TunnelSetupMs),
+					mapSegments[logIndex][playoutSegmentNumber].TunnelRetrans,
+					mapSegments[logIndex][playoutSegmentNumber].TunnelRetransRate,
+					mapSegments[logIndex][playoutSegmentNumber].TunnelQueueBytes,
+					mapSegments[logIndex][playoutSegmentNumber].TunnelBwEstimate,
+					mapSegments[logIndex][playoutSegmentNumber].TunnelTargetRate,
+					mapSegments[logIndex][playoutSegmentNumber].TunnelFeedbackRTT,
+					mapSegments[logIndex][playoutSegmentNumber].ServerSendRate,
+					mapSegments[logIndex][playoutSegmentNumber].TunnelForwardRate,
 					// add the QoE model outputs
 					fmt.Sprintf("%.3f", mapSegments[logIndex][playoutSegmentNumber].P1203),
 					fmt.Sprintf("%.3f", mapSegments[logIndex][playoutSegmentNumber].Clae),

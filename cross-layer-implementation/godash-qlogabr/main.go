@@ -95,7 +95,7 @@ var Noden = P2Pconsul.NodeUrl{}
 
 // slices for our encoders, algorithms and HLS
 var codecSlice = []string{glob.RepRateCodecAVC, glob.RepRateCodecHEVC, glob.RepRateCodecVP9, glob.RepRateCodecAV1}
-var algorithmSlice = []string{glob.ConventionalAlg, glob.ElasticAlg, glob.LogisticAlg, glob.TestAlg, glob.ProgressiveAlg, glob.MeanAverageAlg, glob.GeomAverageAlg, glob.EMWAAverageAlg, glob.ArbiterAlg, glob.BBAAlg, glob.MeanAverageXLAlg, glob.MeanAverageRecentXLAlg, glob.PensieveAlg, glob.BBA1Alg_AV, glob.BBA1Alg_AVXL, glob.BBA2Alg_AV, glob.BBA2Alg_AVXL_base, glob.BBA2Alg_AVXL_double}
+var algorithmSlice = []string{glob.ConventionalAlg, glob.ElasticAlg, glob.LogisticAlg, glob.TestAlg, glob.ProgressiveAlg, glob.MeanAverageAlg, glob.GeomAverageAlg, glob.EMWAAverageAlg, glob.ArbiterAlg, glob.BBAAlg, glob.MeanAverageXLAlg, glob.MeanAverageRecentXLAlg, glob.PensieveAlg, glob.PensieveXLAlg, glob.BBA1Alg_AV, glob.BBA1Alg_AVXL, glob.BBA2Alg_AV, glob.BBA2Alg_AVXL_base, glob.BBA2Alg_AVXL_double}
 var hlsSlice = []string{glob.HlsOff, glob.HlsOn}
 var storeFilesSlice = []string{glob.StoreFilesOff, glob.StoreFilesOn}
 
@@ -136,16 +136,18 @@ func main() {
 	streamSpeedPtr := flag.Float64(glob.StreamSpeedName, 1, "multiplier for speed of stream")
 	maxBufferPtr := flag.Int(glob.MaxBufferName, 30, "maximum stream buffer in seconds")
 	initBufferPtr := flag.Int(glob.InitBufferName, 2, "initial number of segments to download before stream starts")
-	adaptPtr := flag.String(glob.AdaptName, glob.ConventionalAlg, "DASH algorithms - \""+glob.ConventionalAlg+"|"+glob.ElasticAlg+"|"+glob.ProgressiveAlg+"|"+glob.LogisticAlg+"|"+glob.MeanAverageAlg+"|"+glob.GeomAverageAlg+"|"+glob.EMWAAverageAlg+"|"+glob.ArbiterAlg+"|"+glob.PensieveAlg+"|"+glob.BBA1Alg_AV+"|"+glob.BBA1Alg_AVXL+"|"+glob.BBA2Alg_AV+"|"+glob.BBA2Alg_AVXL_base+"\"")
+	adaptPtr := flag.String(glob.AdaptName, glob.ConventionalAlg, "DASH algorithms - \""+glob.ConventionalAlg+"|"+glob.ElasticAlg+"|"+glob.ProgressiveAlg+"|"+glob.LogisticAlg+"|"+glob.MeanAverageAlg+"|"+glob.GeomAverageAlg+"|"+glob.EMWAAverageAlg+"|"+glob.ArbiterAlg+"|"+glob.PensieveAlg+"|"+glob.PensieveXLAlg+"|"+glob.BBA1Alg_AV+"|"+glob.BBA1Alg_AVXL+"|"+glob.BBA2Alg_AV+"|"+glob.BBA2Alg_AVXL_base+"|"+glob.BBA2Alg_AVXL_double+"\"")
 	pensieveServerPtr := flag.String(glob.PensieveServerName, "http://127.0.0.1:8333", "Pensieve external inference service endpoint - \"[http://host:port]\"")
 	storeFilesPtr := flag.String(glob.StoreFiles, glob.StoreFilesOff, "store the streamed DASH files, and associated files - \"["+glob.StoreFilesOn+"|"+glob.StoreFilesOff+"]\"")
 	fileStoreNamePtr := flag.String(glob.FileStoreName, "", "folder location within "+fileDownloadLocation+" to store the streamed DASH files - if no folder is passed, output defaults to \"../files\" folder")
 	terminalPrintPtr := flag.String(glob.TerminalPrintName, glob.TerminalPrintOff, "extend the output logs to provide additional information - \"["+glob.TerminalPrintOn+"|"+glob.TerminalPrintOff+"]\"")
 	hlsPtr := flag.String(glob.HlsName, glob.HlsOff, "HLS setting - used for redownloading chunks at a higher quality rep_rate - \""+glob.HlsOff+"|"+glob.HlsOn+"\"")
 	quicPtr := flag.String(glob.QuicName, glob.QuicOff, "download the stream using the QUIC transport protocol - \"["+glob.QuicOn+"|"+glob.QuicOff+"]\"")
-	transportPtr := flag.String(glob.TransportName, glob.TransportDirect, "request transport backend - \"["+glob.TransportDirect+"|"+glob.TransportMasque+"]\"")
+	transportPtr := flag.String(glob.TransportName, glob.TransportDirect, "request transport backend - \"["+glob.TransportDirect+"|"+glob.TransportMasque+"|"+glob.TransportMDT+"|"+glob.TransportMST+"|"+glob.TransportMFT+"|"+glob.TransportRMDT+"|"+glob.TransportRMDTBBR+"|"+glob.TransportTECC+"]\"")
 	masqueProxyTemplatePtr := flag.String(glob.MasqueProxyTemplateName, "", "MASQUE proxy URL template for CONNECT-UDP, for example \"https://proxy.example/.well-known/masque/udp/{target_host}/{target_port}/\"")
 	masqueInsecurePtr := flag.Bool("masqueInsecure", true, "skip MASQUE proxy TLS certificate verification")
+	teccProxyDebugURLPtr := flag.String(glob.TECCProxyDebugURLName, "", "optional TECC/MASQUE proxy debug URL for tunnel metrics, for example \"https://127.0.0.1:5543/debug/rmdt\"")
+	teccFeedbackForwardURLPtr := flag.String(glob.TECCFeedbackForwardURLName, "", "optional TECC feedback forward URL, for example \"http://127.0.0.1:8090/feedback\"")
 	expRatioPtr := flag.Float64(glob.ExpRatioName, 0, "download the stream with exponential parameter : ratio - this only works with these algorithms (XXXXXXXXX)")
 	getHeaderPtr := flag.String(glob.GetHeaderName, glob.GetHeaderOff, "get the header information for all segments across all of the MPD urls - based on:  \"["+glob.GetHeaderOff+"|"+glob.GetHeaderOn+"|"+glob.GetHeaderOnline+"|"+glob.GetHeaderOffline+"]\" "+glob.GetHeaderOff+": do not get headers, "+glob.GetHeaderOn+": get all headers defined by MPD, "+glob.GetHeaderOnline+": get headers from webserver based on algorithm input and "+glob.GetHeaderOffline+": get headers from header file based on algorithm input (file created by "+glob.GetHeaderOn+"). If getHeaders is set to "+glob.GetHeaderOn+", the client will download the headers and then stop the client")
 	printHeaderPtr := flag.String(glob.PrintHeaderName, "", "print columns based on selected print headers:")
@@ -341,9 +343,11 @@ func main() {
 	}
 
 	backend, err := transport.NewBackend(transport.Config{
-		Mode:                *transportPtr,
-		MasqueProxyTemplate: *masqueProxyTemplatePtr,
-		MasqueInsecure:      *masqueInsecurePtr,
+		Mode:                   *transportPtr,
+		MasqueProxyTemplate:    *masqueProxyTemplatePtr,
+		MasqueInsecure:         *masqueInsecurePtr,
+		TECCProxyDebugURL:      *teccProxyDebugURLPtr,
+		TECCFeedbackForwardURL: *teccFeedbackForwardURLPtr,
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -351,7 +355,7 @@ func main() {
 	defer backend.Close()
 	http.SetTransportBackend(backend)
 	logging.DebugPrint(glob.DebugFile, debugLog, "DEBUG: ", "-"+glob.TransportName+" set to "+backend.Mode())
-	if backend.Mode() == transport.ModeMasque {
+	if backend.Mode() == transport.ModeMasque || backend.Mode() == transport.ModeMDT {
 		logging.DebugPrint(glob.DebugFile, debugLog, "DEBUG: ", "-"+glob.MasqueProxyTemplateName+" set to "+*masqueProxyTemplatePtr)
 	}
 

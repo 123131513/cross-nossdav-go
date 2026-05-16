@@ -39,6 +39,7 @@ func (b *DirectBackend) Close() error {
 func (b *DirectBackend) GetHTTPClient(quicBool bool, debugFile string, debugLog bool, useTestbedBool bool) (*http.Transport, *http.Client, *http3.Transport, error) {
 	SetTunnelSetupTime(0)
 	SetOuterProtocol("-")
+	SetTunnelMetrics(TunnelMetrics{})
 	SetLastError(nil)
 
 	if b.client != nil {

@@ -39,4 +39,4 @@ require (
 
 replace github.com/quic-go/quic-go => ../quic-go-v0.59
 
-replace github.com/quic-go/masque-go => ../../../masque-go-original
+replace github.com/quic-go/masque-go => ../../../TECC/forks/masque-go-tecc

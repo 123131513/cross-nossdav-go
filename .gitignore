@@ -1,6 +1,12 @@
 applications/
 www/video/
 *.env
+.codex
+cross-layer-implementation/quic-go-v0.59/
+cross-layer-implementation/quic-go.backup-*/
+paper-utilities/pensieve/.venv-pensieve/
+paper-utilities/pensieve/rl_server/__pycache__/
+paper-utilities/pensieve/rl_server/results/
 
 *.mp4
 *.m4s

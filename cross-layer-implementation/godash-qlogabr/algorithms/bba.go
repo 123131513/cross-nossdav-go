@@ -14,6 +14,25 @@ import (
 	"github.com/uccmisl/godash/logging"
 )
 
+func clampRepresentationIndex(idx int, bandwithList []int) int {
+	if idx < 0 {
+		return 0
+	}
+	if idx >= len(bandwithList) {
+		return len(bandwithList) - 1
+	}
+	return idx
+}
+
+func limitRepresentationStep(chosenRep int, previousRepRate int, bandwithList []int) int {
+	if chosenRep < previousRepRate {
+		chosenRep = previousRepRate - 1
+	} else if chosenRep > previousRepRate {
+		chosenRep = previousRepRate + 1
+	}
+	return clampRepresentationIndex(chosenRep, bandwithList)
+}
+
 /*
  * Contains all extra information that BBA-2 gathers during all segment decisions
  */
@@ -114,11 +133,7 @@ func BBA(bufferLevel_Milliseconds int, maxBufferLevel_Seconds int, highestMPDrep
 	chosenRep := SelectRepRateWithThroughtput(int(desiredBitrate), bandwithList, lowestMPDrepRateIndex)
 
 	// Check if the desired reprate is more than 1 step higher or lower in the rate ladder
-	if bandwithList[chosenRep] > previousRepRate {
-		chosenRep = previousRepRate - 1
-	} else if bandwithList[chosenRep] < previousRepRate {
-		chosenRep = previousRepRate + 1
-	}
+	chosenRep = limitRepresentationStep(chosenRep, previousRepRate, bandwithList)
 
 	return chosenRep
 }
@@ -210,13 +225,14 @@ func BBA2(bufferLevel_Milliseconds int, maxBufferLevel_Seconds int, highestMPDre
 	}
 
 	// Check if the desired reprate is more than 1 step higher or lower in the rate ladder
-	if bandwithList[chosenRep] > bandwithList[previousRepRate] {
+	if chosenRep < previousRepRate {
 		chosenRep = previousRepRate - 1
 		logging.DebugPrint(debugFile, debugLog, "DEBUG: ", "Stepping up")
-	} else if bandwithList[chosenRep] < bandwithList[previousRepRate] {
+	} else if chosenRep > previousRepRate {
 		chosenRep = previousRepRate + 1
 		logging.DebugPrint(debugFile, debugLog, "DEBUG: ", "Stepping down")
 	}
+	chosenRep = clampRepresentationIndex(chosenRep, bandwithList)
 
 	// Use Rate in startup
 	if data.UsingRate {

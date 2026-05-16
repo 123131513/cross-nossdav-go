@@ -131,8 +131,8 @@ func createP1203(logMap *map[int]logging.SegPrintLogInformation, c chan float64,
 		createP1203file(*logMap, jsonString)
 
 		// calculate the P1203 value and return to the channel
-		// c <- getP1203Val(*logMap)
-		// just get the value
+		c <- getP1203Val(*logMap)
+		return
 	}
 	// lets just get the overall P.1203 value that we want
 	/*out, err := exec.Command("bash", "-c", "python3 -c 'from itu_p1203 import P1203Standalone; print(P1203Standalone("+jsonString+").calculate_complete(True)[\"O46\"])'").Output()
@@ -153,6 +153,21 @@ func createP1203(logMap *map[int]logging.SegPrintLogInformation, c chan float64,
 	// calculate the P1203 value and return to the channel
 	c <- p1203Value*/
 	c <- 0.0
+}
+
+func parseP1203Float(raw []byte, source string) float64 {
+	stringVal := strings.TrimSpace(string(raw))
+	if stringVal == "" {
+		log.Printf("warning: empty P.1203 output from %s; falling back to 0.0", source)
+		return 0.0
+	}
+
+	p1203Val, err := strconv.ParseFloat(stringVal, 64)
+	if err != nil {
+		log.Printf("warning: invalid P.1203 output %q from %s: %v; falling back to 0.0", stringVal, source, err)
+		return 0.0
+	}
+	return p1203Val
 }
 
 // getP1203Val : return the P1203 value for this segment
@@ -176,16 +191,7 @@ func getP1203Val(logMap map[int]logging.SegPrintLogInformation) (p1203Val float6
 		log.Fatal(err)
 	}
 
-	// get the P1203 value and remove any return carrige
-	stringVal := strings.TrimSuffix(string(out), "\n")
-
-	// save this string as a float64
-	p1203Val, err = strconv.ParseFloat(stringVal, 64)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	return
+	return parseP1203Float(out, fileInput)
 }
 
 // createP1203file : create a P1203 json file for the last downloaded segment
