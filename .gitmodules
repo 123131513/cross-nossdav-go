@@ -1,3 +1,6 @@
 [submodule "paper-utilities/pensieve"]
 	path = paper-utilities/pensieve
 	url = https://github.com/123131513/pensieve.git
+[submodule "cross-layer-implementation/quic-go-v0.59"]
+	path = cross-layer-implementation/quic-go-v0.59
+	url = git@github.com:Scarlett1017/quic-go-v0.59.git
