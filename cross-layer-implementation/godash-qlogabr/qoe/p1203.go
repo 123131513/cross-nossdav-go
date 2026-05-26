@@ -186,7 +186,7 @@ func getP1203Val(logMap map[int]logging.SegPrintLogInformation) (p1203Val float6
 	}
 
 	// calculate the P1203 value - P1203 knows from looking at the generated json file what mode to use
-	out, err := exec.Command("bash", "-c", "python3 -m itu_p1203 --print-intermediate "+fileInput+" 2> /dev/null | tail -n 6 | head -n1 | cut -f 1 -d ',' | cut -f 4 -d ' '").Output()
+	out, err := exec.Command("bash", "-c", "python3 -m itu_p1203 --accept-notice --print-intermediate "+fileInput+" 2> /dev/null | tail -n 6 | head -n1 | cut -f 1 -d ',' | cut -f 4 -d ' '").Output()
 	if err != nil {
 		log.Fatal(err)
 	}

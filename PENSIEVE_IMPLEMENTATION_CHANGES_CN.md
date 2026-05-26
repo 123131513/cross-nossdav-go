@@ -117,18 +117,16 @@ git submodule update --init --recursive
 
 ### 6.2 准备 Pensieve 环境
 
-进入子模块：
+详细的从零配置流程见：
 
-```bash
-cd paper-utilities/pensieve
-```
+- `PENSIEVE_PY38_LOCAL_SETUP_CN.md`
 
-按照当前子模块 README，这一版迁移代码的目标环境是：
+当前已经跑通的本机方案是：
 
-- Ubuntu 18.04
-- Python 3.8
-- TensorFlow 2.7.0
-- TFLearn 0.5.0
+- 在当前仓库 `.tools/` 下安装 Miniforge
+- 创建 `.tools/pensieve-py38` 独立 Python 3.8 环境
+- 安装 `tensorflow==2.7.0`、`tflearn==0.5.0`、`protobuf<3.21`、`Pillow<10`
+- 从 `paper-utilities/pensieve/rl_server` 目录启动 `rl_server_no_training.py`
 
 当前这版 `rl_server/rl_server_no_training.py` 已经改成 Python 3 语法，并使用 `tf.compat.v1` 路径；当前仓库另外补了几处最小修正，使它在 Python 3 下的 I/O 行为与 HTTP 响应格式保持一致。
 
@@ -140,8 +138,8 @@ cd paper-utilities/pensieve
 
 更稳妥的方式是：
 
-- 手动创建 Python 3.8 虚拟环境
-- 手动安装 `tensorflow`、`tflearn`、`matplotlib`、`selenium`
+- 按 `PENSIEVE_PY38_LOCAL_SETUP_CN.md` 手动创建 Python 3.8 隔离环境
+- 只安装 `rl_server_no_training.py` 推理所需的最小依赖
 - 只单独运行 `rl_server_no_training.py`
 
 如果你们使用自己的 fork，建议至少先在 `paper-utilities/pensieve` 中确认：
@@ -152,8 +150,9 @@ cd paper-utilities/pensieve
 ### 6.3 启动官方 Pensieve rl_server
 
 ```bash
-cd paper-utilities/pensieve/rl_server
-python3 rl_server_no_training.py
+cd /home/quic2/masque-HAS/cross-nossdav-go/paper-utilities/pensieve/rl_server
+/home/quic2/masque-HAS/cross-nossdav-go/.tools/pensieve-py38/bin/python \
+  rl_server_no_training.py
 ```
 
 默认监听端口是 `8333`。

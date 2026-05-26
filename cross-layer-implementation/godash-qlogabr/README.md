@@ -100,16 +100,35 @@ The best option to run goDASH is to use the configure.json file
 ```
 
 --------------------------------------------------------
-To output the P.1203 QoE values, you will need to install the P.1203 GitHub repository
+To output the P.1203 QoE values, install ITU P.1203 and make sure the same
+terminal can find both `p1203-standalone` and `python3 -m itu_p1203`.
+
+For this repository, the recommended local setup is documented in
+`../../QoE_INTRODUCTION_CN.md`, section `从零配置 -QoE on`.
+
+The short version is:
 ```
-git clone github.com/itu-p1203/itu-p1203.git
+cd /home/quic2/masque-HAS/cross-nossdav-go
+
+HOME=/tmp/pensieve-home \
+.tools/miniforge3-pensieve-local/bin/conda create -y -p .tools/qoe-py310 python=3.10
+
+git clone https://github.com/itu-p1203/itu-p1203.git .tools/itu-p1203
+
+.tools/qoe-py310/bin/python -m pip install .tools/itu-p1203
+
+export PATH=/home/quic2/masque-HAS/cross-nossdav-go/.tools/qoe-py310/bin:$PATH
 ```
 
-Then follow the install instruction for P.1203.
-
-Make sure that once P.1203 has been installed that you run P.1203 before using goDASH, as you will need to accept their code.
+Verify before running goDASH:
 ```
-python3 -m itu_p1203 examples/mode0.json
+p1203-standalone --version
+python3 -m itu_p1203 --accept-notice /home/quic2/masque-HAS/cross-nossdav-go/.tools/itu-p1203/examples/mode0.json
+```
+
+Then run goDASH with:
+```
+-QoE on -storeDASH on
 ```
 
 --------------------------------------------------------

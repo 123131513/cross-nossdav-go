@@ -1,96 +1,187 @@
-# Pensieve Py3.8 本机最小运行说明
+# Pensieve Python 3.8 环境建立与服务启动说明
 
-本文档记录当前主机上实际跑通 `paper-utilities/pensieve/rl_server/rl_server_no_training.py` 的最小隔离环境方案。
+本文档记录如何在当前仓库中从零建立 Pensieve 所需的 Python 环境，并启动
+`paper-utilities/pensieve/rl_server/rl_server_no_training.py` 服务。
+
+适合第一次配置的同学按顺序执行。所有命令默认在当前仓库根目录执行：
+
+```bash
+cd /home/quic2/masque-HAS/cross-nossdav-go
+```
 
 ## 1. 目标
 
-目标是：
+最终要得到：
 
-- 不污染主机系统 Python
-- 在用户目录下创建独立 Python 3.8 环境
-- 启动 Pensieve `rl_server_no_training.py`
-- 用本地 HTTP 请求验证服务可以返回码率动作
+- 一个不污染系统 Python 的独立 Python 3.8 环境
+- 能导入 `tensorflow==2.7.0` 和 `tflearn==0.5.0`
+- Pensieve `rl_server_no_training.py` 能恢复 checkpoint
+- 本机 `http://127.0.0.1:8333` 能返回码率动作
 
-当前主机不具备 GPU，这不影响在线推理。
+当前主机没有 GPU 不影响在线推理。TensorFlow 启动时打印的 CUDA 相关警告可以忽略。
 
-## 2. 为什么没有直接用系统 `venv`
+## 2. 为什么不用系统 Python
 
-这台主机的实际情况是：
-
-- 系统只有 `python3.10`
-- 没有 `python3.8`
-- `python3 -m venv` 依赖的 `ensurepip` 也不可用
-
-因此这里采用用户目录下的 `Miniforge + conda env` 方案，仍然满足“隔离环境、不影响主机现有环境”的要求。
-
-## 3. 最小安装命令
-
-以下命令是在当前主机上实际执行并跑通的最小集合。
-
-### 3.1 安装 Miniforge 到用户目录
+当前主机上的系统 Python 是：
 
 ```bash
-mkdir -p ~/.local
-cd ~/.local
-curl -L -o Miniforge3.sh \
+python3 --version
+```
+
+实际结果为：
+
+```text
+Python 3.10.12
+```
+
+Pensieve 这版服务依赖旧版 TensorFlow/TFLearn 组合，更稳妥的运行环境是：
+
+- Python 3.8
+- TensorFlow 2.7.0
+- TFLearn 0.5.0
+- protobuf 3.20.x
+- Pillow 9.x
+
+另外，当前系统的 `python3 -m venv` 依赖 `ensurepip`，本机没有完整安装 `python3.10-venv`，直接创建 venv 会失败。因此本文使用仓库内的 Miniforge/conda 环境。
+
+## 3. 环境目录约定
+
+本文把工具和 Python 环境都放在当前仓库的 `.tools/` 目录下：
+
+```text
+.tools/miniforge3-pensieve-local/   # Miniforge/conda 本体
+.tools/pensieve-py38/               # Pensieve 专用 Python 3.8 环境
+```
+
+`.tools/` 已加入 `.gitignore`，不会被提交到 Git。
+
+## 4. 安装 Miniforge
+
+下载安装脚本：
+
+```bash
+curl -L -o /tmp/Miniforge3-pensieve.sh \
   https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh
-bash Miniforge3.sh -b -p ~/.local/miniforge3-pensieve
 ```
 
-### 3.2 创建独立 Python 3.8 环境
+创建临时 HOME，避免安装器写入真实用户目录：
 
 ```bash
-~/.local/miniforge3-pensieve/bin/conda create -y -n pensieve-py38 python=3.8
+mkdir -p /tmp/pensieve-home
 ```
 
-### 3.3 安装运行 `rl_server` 的最小依赖
+安装 Miniforge 到仓库内：
 
 ```bash
-~/.local/miniforge3-pensieve/bin/conda run -n pensieve-py38 \
-  python -m pip install --upgrade pip
+HOME=/tmp/pensieve-home \
+bash /tmp/Miniforge3-pensieve.sh -b -p \
+  /home/quic2/masque-HAS/cross-nossdav-go/.tools/miniforge3-pensieve-local
+```
 
-~/.local/miniforge3-pensieve/bin/conda run -n pensieve-py38 \
-  python -m pip install \
+如果这个目录之前已经存在，可以使用更新模式重新执行：
+
+```bash
+HOME=/tmp/pensieve-home \
+bash /tmp/Miniforge3-pensieve.sh -b -u -p \
+  /home/quic2/masque-HAS/cross-nossdav-go/.tools/miniforge3-pensieve-local
+```
+
+## 5. 创建 Python 3.8 环境
+
+```bash
+HOME=/tmp/pensieve-home \
+/home/quic2/masque-HAS/cross-nossdav-go/.tools/miniforge3-pensieve-local/bin/conda \
+  create -y -p /home/quic2/masque-HAS/cross-nossdav-go/.tools/pensieve-py38 \
+  python=3.8
+```
+
+检查 Python 版本：
+
+```bash
+/home/quic2/masque-HAS/cross-nossdav-go/.tools/pensieve-py38/bin/python --version
+```
+
+期望看到类似：
+
+```text
+Python 3.8.20
+```
+
+## 6. 安装 Pensieve 运行依赖
+
+用刚创建好的 Python 安装依赖：
+
+```bash
+/home/quic2/masque-HAS/cross-nossdav-go/.tools/pensieve-py38/bin/python \
+  -m pip install \
   tensorflow==2.7.0 \
   tflearn==0.5.0 \
   'protobuf<3.21' \
   'Pillow<10'
 ```
 
-这几个版本约束不是随意加的，而是这次实机启动时确认必须存在：
+这些版本约束是必要的：
 
-- `tensorflow==2.7.0`
-- `tflearn==0.5.0`
-- `protobuf<3.21`
-  原因：避免 TensorFlow 2.7 与较新 `protobuf` 的 descriptor 兼容错误
-- `Pillow<10`
-  原因：避免 `tflearn` 仍访问 `Image.ANTIALIAS` 导致导入失败
+- `tensorflow==2.7.0`：匹配当前 Pensieve 迁移代码
+- `tflearn==0.5.0`：Pensieve 网络结构依赖它
+- `protobuf<3.21`：避免 TensorFlow 2.7 和新版 protobuf 的 descriptor 兼容问题
+- `Pillow<10`：避免 TFLearn 访问已删除的 `Image.ANTIALIAS` 时报错
 
-## 4. 启动方式
+## 7. 检查依赖是否可导入
 
-必须从 `rl_server/` 目录启动，因为脚本内部仍按相对路径加载 checkpoint：
+执行：
 
 ```bash
-cd /home/quic/cross-that-boundary-mmsys23-nossdav/paper-utilities/pensieve/rl_server
-~/.local/miniforge3-pensieve/bin/conda run -n pensieve-py38 \
-  python rl_server_no_training.py
+/home/quic2/masque-HAS/cross-nossdav-go/.tools/pensieve-py38/bin/python \
+  -c "import sys; print(sys.executable); print(sys.version); import tensorflow as tf; print('tensorflow', tf.__version__); import tflearn; print('tflearn ok')"
 ```
 
-成功启动后的关键标志是输出：
+期望看到：
+
+```text
+/home/quic2/masque-HAS/cross-nossdav-go/.tools/pensieve-py38/bin/python
+3.8.20 ...
+tensorflow 2.7.0
+tflearn ok
+```
+
+可能还会看到：
+
+```text
+Scipy not supported!
+Could not load dynamic library 'libcudart.so.11.0'
+```
+
+这些不影响 Pensieve 推理服务启动。
+
+## 8. 启动 Pensieve 服务
+
+必须从 `rl_server/` 目录启动，因为脚本内部使用相对路径加载模型文件：
+
+```bash
+cd /home/quic2/masque-HAS/cross-nossdav-go/paper-utilities/pensieve/rl_server
+/home/quic2/masque-HAS/cross-nossdav-go/.tools/pensieve-py38/bin/python \
+  rl_server_no_training.py
+```
+
+启动成功的关键输出是：
 
 ```text
 Model restored.
+Listening on port 8333
 ```
 
-然后服务会监听：
+服务默认监听：
 
 ```text
-127.0.0.1:8333
+http://127.0.0.1:8333
 ```
 
-## 5. 本地接口验证
+这个终端要保持打开。关闭终端或按 `Ctrl+C` 会停止 Pensieve 服务。
 
-在不涉及播放器的情况下，可以直接发送一个最小 POST 请求：
+## 9. 验证服务是否可用
+
+另开一个终端，执行：
 
 ```bash
 curl -sS -X POST http://127.0.0.1:8333 \
@@ -106,47 +197,114 @@ curl -sS -X POST http://127.0.0.1:8333 \
   }'
 ```
 
-本次实机验证返回：
+如果返回一个数字，例如：
 
 ```text
 1
 ```
 
-这说明：
+说明：
 
-- 服务已成功监听本地端口
-- checkpoint 已成功恢复
-- actor 网络已完成一次推理
-- HTTP 输入输出接口已可被 GoDASH 后续接入使用
+- HTTP 服务已经监听成功
+- checkpoint 已经恢复
+- actor 网络已经完成一次推理
+- GoDASH 后续可以通过 `-pensieveServer http://127.0.0.1:8333` 调用它
 
-## 6. 当前已经确认的兼容性修正
+返回值不是固定的，可能是 `0` 到 `5` 之间的动作编号，也可能在最后一段返回 `REFRESH`。
 
-为了让这版 py38 子模块在当前主机上真正跑起来，本次已经确认需要这些代码兼容修正：
+## 10. GoDASH 调用方式
+
+保持 Pensieve 服务运行，然后在 GoDASH 启动参数中加入：
+
+```bash
+-adapt pensieve -pensieveServer http://127.0.0.1:8333
+```
+
+示例形式：
+
+```bash
+cd /home/quic2/masque-HAS/cross-nossdav-go/cross-layer-implementation/godash-qlogabr
+go run . -adapt pensieve -pensieveServer http://127.0.0.1:8333 ...
+```
+
+省略号部分需要替换为你本次实验原本使用的 MPD、输出目录和其他播放参数。
+
+## 11. 常见问题
+
+### 11.1 `ModuleNotFoundError: No module named 'tensorflow'`
+
+说明你用的是系统 Python 或其他错误环境。
+
+请确认启动命令使用的是：
+
+```bash
+/home/quic2/masque-HAS/cross-nossdav-go/.tools/pensieve-py38/bin/python
+```
+
+不要直接用 `python3 rl_server_no_training.py`。
+
+### 11.2 找不到 checkpoint 或恢复模型失败
+
+确认启动位置必须是：
+
+```bash
+/home/quic2/masque-HAS/cross-nossdav-go/paper-utilities/pensieve/rl_server
+```
+
+并确认模型文件存在：
+
+```bash
+ls results/pretrain_linear_reward.ckpt*
+```
+
+正常应能看到：
+
+```text
+results/pretrain_linear_reward.ckpt.data-00000-of-00001
+results/pretrain_linear_reward.ckpt.index
+results/pretrain_linear_reward.ckpt.meta
+```
+
+### 11.3 `PermissionError: [Errno 1] Operation not permitted`
+
+如果在受限沙箱中运行，可能无法创建监听 socket。正常终端中直接执行启动命令即可；如果通过受限执行器运行，需要允许它监听本机端口。
+
+### 11.4 端口已经被占用
+
+检查是否已经有 Pensieve 服务在运行：
+
+```bash
+curl -sS -X POST http://127.0.0.1:8333 \
+  -H 'Content-Type: application/json' \
+  -d '{"lastquality":0,"buffer":4.0,"RebufferTime":0.0,"lastChunkStartTime":0.0,"lastChunkFinishTime":800.0,"lastChunkSize":500000.0,"lastRequest":1}'
+```
+
+如果能返回数字，说明服务已经可用，不需要重复启动。
+
+### 11.5 想重新开始一次干净实验
+
+官方 `rl_server_no_training.py` 没有单独的 `/reset` API。最稳妥的方法是：
+
+1. 在 Pensieve 服务终端按 `Ctrl+C`
+2. 重新执行第 8 节的启动命令
+3. 再启动 GoDASH 实验
+
+## 12. 当前已经确认的兼容性修正
+
+当前子模块中已经包含这些 Python 3 / TensorFlow 2 兼容修正：
 
 - `paper-utilities/pensieve/rl_server/a3c.py`
-  - 启用 `tf.compat.v1.disable_eager_execution()`
+  - 使用 `tf.compat.v1.disable_eager_execution()`
   - 将旧 `reduction_indices` 参数改为 `axis`
   - 将 `tf.log` 改为 `tf.math.log`
 - `paper-utilities/pensieve/rl_server/rl_server_no_training.py`
-  - Python 3 的 `http.server` / `bytes` 写回兼容
-  - 文本日志文件打开方式兼容
+  - 使用 Python 3 的 `http.server`
+  - HTTP 写回使用 bytes
+  - 日志文件使用文本模式打开
 
-## 7. 当前边界
-
-虽然 `rl_server` 已经在当前主机上跑通，但还要注意这些边界：
+## 13. 当前边界
 
 - 当前服务仍要求从 `rl_server/` 目录启动
-- 仍使用 Pensieve 原始固定码率梯度：
-  - `300, 750, 1200, 1850, 2850, 4300`
-- 仍依赖脚本内部固定的视频 chunk size 表
-- CPU 推理可行，但训练在无 GPU 主机上会明显更慢
-
-## 8. 建议的后续验证
-
-如果要进一步确认“和 GoDASH 的接线已经完整可用”，建议按下面顺序继续验证：
-
-1. 先保持这个 `rl_server` 本地运行
-2. 再让 GoDASH 用 `-adapt pensieve -pensieveServer http://127.0.0.1:8333`
-3. 检查播放器侧每段请求后是否都能收到动作
-4. 检查最后一段结束时是否正确处理 `REFRESH`
-5. 再对照日志确认动作序列是否合理变化
+- 默认码率集合仍是 Pensieve 原始固定梯度：`300, 750, 1200, 1850, 2850, 4300`
+- 默认使用脚本内部固定的视频 chunk size 表
+- CPU 推理可行；训练会明显更慢

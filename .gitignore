@@ -1,5 +1,6 @@
 applications/
 www/video/
+.tools/
 *.env
 .codex
 cross-layer-implementation/quic-go-v0.59/
