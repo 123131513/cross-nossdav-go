@@ -177,6 +177,8 @@ var mimeTypesMediaType []abrqlog.MediaType
 var streamStructs []http.StreamStruct
 var BBA2DataStruct algo.BBA2Data
 var PensieveClient *algo.PensieveExternalClient
+var RobustMPCDataStruct algo.RobustMPCState
+var BOLASSIMDataProfile *algo.BOLASSIMProfile
 
 func parseFrameRate(frameRate string) int {
 	if frameRate == "" {
@@ -209,7 +211,7 @@ func parseFrameRate(frameRate string) int {
  * check the different arguments in order to stream
  * call streamLoop to begin to stream
  */
-func Stream(mpdList []http.MPD, debugFile string, debugLog bool, codec string, codecName string, maxHeight int, streamDuration int, streamSpeed float64, maxBuffer int, initBuffer int, adapt string, pensieveServer string, urlString string, fileDownloadLocationIn string, extendPrintLog bool, hls string, hlsBool bool, quic string, quicBool bool, getHeaderBool bool, getHeaderReadFromFile string, exponentialRatioIn float64, printHeadersDataIn map[string]string, printLogIn bool,
+func Stream(mpdList []http.MPD, debugFile string, debugLog bool, codec string, codecName string, maxHeight int, streamDuration int, streamSpeed float64, maxBuffer int, initBuffer int, adapt string, pensieveServer string, bolaSSIMProfile *algo.BOLASSIMProfile, urlString string, fileDownloadLocationIn string, extendPrintLog bool, hls string, hlsBool bool, quic string, quicBool bool, getHeaderBool bool, getHeaderReadFromFile string, exponentialRatioIn float64, printHeadersDataIn map[string]string, printLogIn bool,
 	useTestbedBoolIn bool, getQoEBoolIn bool, saveFilesBoolIn bool, Noden P2Pconsul.NodeUrl, accountant *xlayer.CrossLayerAccountant) {
 
 	// set debug logs for the collab clients
@@ -236,6 +238,8 @@ func Stream(mpdList []http.MPD, debugFile string, debugLog bool, codec string, c
 	useTestbedBool = useTestbedBoolIn
 	getQoEBool = getQoEBoolIn
 	saveFilesBool = saveFilesBoolIn
+	RobustMPCDataStruct.Reset()
+	BOLASSIMDataProfile = bolaSSIMProfile
 
 	// check the codec and print error is false
 	// if !usedVideoCodec {
@@ -443,6 +447,18 @@ func Stream(mpdList []http.MPD, debugFile string, debugLog bool, codec string, c
 			case glob.EMWAAverageAlg:
 				http.GetFile(currentURL, baseJoined, fileDownloadLocation, false, startRange, endRange, segmentNumber,
 					segmentDuration, true, quicBool, debugFile, debugLog, useTestbedBool, repRate, saveFilesBool, AudioByteRange, profile, currentMediaType, ctx2)
+			case glob.RobustMPCAlg:
+				http.GetFile(currentURL, baseJoined, fileDownloadLocation, false, startRange, endRange, segmentNumber,
+					segmentDuration, true, quicBool, debugFile, debugLog, useTestbedBool, repRate, saveFilesBool, AudioByteRange, profile, currentMediaType, ctx2)
+				repRate = l_lowestMPDrepRateIndex
+			case glob.BOLAAlg:
+				http.GetFile(currentURL, baseJoined, fileDownloadLocation, false, startRange, endRange, segmentNumber,
+					segmentDuration, true, quicBool, debugFile, debugLog, useTestbedBool, repRate, saveFilesBool, AudioByteRange, profile, currentMediaType, ctx2)
+				repRate = l_lowestMPDrepRateIndex
+			case glob.BOLASSIMAlg:
+				http.GetFile(currentURL, baseJoined, fileDownloadLocation, false, startRange, endRange, segmentNumber,
+					segmentDuration, true, quicBool, debugFile, debugLog, useTestbedBool, repRate, saveFilesBool, AudioByteRange, profile, currentMediaType, ctx2)
+				repRate = l_lowestMPDrepRateIndex
 			case glob.MeanAverageXLAlg:
 				http.GetFile(currentURL, baseJoined, fileDownloadLocation, false, startRange, endRange, segmentNumber,
 					segmentDuration, true, quicBool, debugFile, debugLog, useTestbedBool, repRate, saveFilesBool, AudioByteRange, profile, currentMediaType, ctx2)
@@ -517,12 +533,15 @@ func Stream(mpdList []http.MPD, debugFile string, debugLog bool, codec string, c
 				BBA2DataStruct = algo.NewBBA2Data(chunksLowest, maxAvgRatioList, &metricsLogger)
 			}
 			if (adapt == glob.PensieveAlg || adapt == glob.PensieveXLAlg) && currentMediaType == abrqlog.MediaTypeVideo {
-				if len(mpdList[mpdListIndex].Periods[0].AdaptationSet[currentMPDRepAdaptSet].Representation) != 6 {
-					fmt.Printf("*** pensieve requires exactly 6 representations in the selected adaptation set, got %d ***\n",
-						len(mpdList[mpdListIndex].Periods[0].AdaptationSet[currentMPDRepAdaptSet].Representation))
+				PensieveClient = algo.NewPensieveExternalClient(pensieveServer)
+				pensieveBandwidths := http.GetRepresentationBandwidth(
+					mpdList[mpdListIndex],
+					currentMPDRepAdaptSet,
+				)
+				if err := PensieveClient.ValidateLadder(pensieveBandwidths); err != nil {
+					fmt.Printf("*** Pensieve service/MPD validation failed: %v ***\n", err)
 					os.Exit(3)
 				}
-				PensieveClient = algo.NewPensieveExternalClient(pensieveServer)
 				if err := PensieveClient.Reset(); err != nil {
 					fmt.Printf("*** failed to reset Pensieve service at %s: %v ***\n", pensieveServer, err)
 					os.Exit(3)
@@ -978,6 +997,12 @@ func streamLoop(streamStructs []http.StreamStruct, Noden P2Pconsul.NodeUrl, acco
 			rtt, segSize, protocol, segmentFileName, P1203Header, status = http.GetFile(currentURL, baseJoined, fileDownloadLocation, isByteRangeMPD, startRange, endRange, segmentNumber, segmentDuration, true, quicBool, glob.DebugFile, debugLog, useTestbedBool, repRate, saveFilesBool, AudioByteRange, profile, mimeTypesMediaType[mimeTypeIndex], ctx)
 		case glob.EMWAAverageAlg:
 			rtt, segSize, protocol, segmentFileName, P1203Header, status = http.GetFile(currentURL, baseJoined, fileDownloadLocation, isByteRangeMPD, startRange, endRange, segmentNumber, segmentDuration, true, quicBool, glob.DebugFile, debugLog, useTestbedBool, repRate, saveFilesBool, AudioByteRange, profile, mimeTypesMediaType[mimeTypeIndex], ctx)
+		case glob.RobustMPCAlg:
+			rtt, segSize, protocol, segmentFileName, P1203Header, status = http.GetFile(currentURL, baseJoined, fileDownloadLocation, isByteRangeMPD, startRange, endRange, segmentNumber, segmentDuration, true, quicBool, glob.DebugFile, debugLog, useTestbedBool, repRate, saveFilesBool, AudioByteRange, profile, mimeTypesMediaType[mimeTypeIndex], ctx)
+		case glob.BOLAAlg:
+			rtt, segSize, protocol, segmentFileName, P1203Header, status = http.GetFile(currentURL, baseJoined, fileDownloadLocation, isByteRangeMPD, startRange, endRange, segmentNumber, segmentDuration, true, quicBool, glob.DebugFile, debugLog, useTestbedBool, repRate, saveFilesBool, AudioByteRange, profile, mimeTypesMediaType[mimeTypeIndex], ctx)
+		case glob.BOLASSIMAlg:
+			rtt, segSize, protocol, segmentFileName, P1203Header, status = http.GetFile(currentURL, baseJoined, fileDownloadLocation, isByteRangeMPD, startRange, endRange, segmentNumber, segmentDuration, true, quicBool, glob.DebugFile, debugLog, useTestbedBool, repRate, saveFilesBool, AudioByteRange, profile, mimeTypesMediaType[mimeTypeIndex], ctx)
 		case glob.TestAlg:
 			rtt, segSize, protocol, segmentFileName, P1203Header, status = http.GetFile(currentURL, baseJoined, fileDownloadLocation, isByteRangeMPD, startRange, endRange, segmentNumber, segmentDuration, true, quicBool, glob.DebugFile, debugLog, useTestbedBool, repRate, saveFilesBool, AudioByteRange, profile, mimeTypesMediaType[mimeTypeIndex], ctx)
 		case glob.ArbiterAlg:
@@ -1305,58 +1330,62 @@ func streamLoop(streamStructs []http.StreamStruct, Noden P2Pconsul.NodeUrl, acco
 
 		// store the current segment log output information in a map
 		printInformation := logging.SegPrintLogInformation{
-			ArrivalTime:          arrivalTime,
-			DeliveryTime:         deliveryTime,
-			StallTime:            stallTime,
-			Bandwidth:            bandwithList[repRate],
-			DelRate:              thr,
-			ActRate:              (segSize * 8) / (segmentDuration * glob.Conversion1000),
-			SegSize:              segSize,
-			P1203HeaderSize:      P1203Header,
-			BufferLevel:          bufferLevel,
-			Adapt:                adapt,
-			SegmentDuration:      segmentDuration,
-			ExtendPrintLog:       extendPrintLog,
-			RepCodec:             repCodec,
-			RepWidth:             repWidth,
-			RepHeight:            repHeight,
-			RepFps:               repFps,
-			PlayStartPosition:    segmentDurationTotal,
-			PlaybackTime:         playPosition,
-			Rtt:                  float64(rtt.Nanoseconds()) / (glob.Conversion1000 * glob.Conversion1000),
-			FileDownloadLocation: fileDownloadLocation,
-			RepIndex:             repRate,
-			MpdIndex:             mpdListIndex,
-			AdaptIndex:           mimeTypes[mimeTypeIndex],
-			SegmentIndex:         nextSegmentNumber,
-			SegReplace:           hlsReplaced,
-			Played:               false,
-			HTTPprotocol:         protocol,
-			TransportMode:        http.GetActiveTransportMode(),
-			InnerProtocol:        strings.TrimSuffix(protocol, "+MASQUE"),
-			OuterProtocol:        http.GetOuterTransportProtocol(),
-			TunnelSetupMs:        http.GetTransportSetupTimeMillis(),
-			TunnelRetrans:        http.GetTunnelRetrans(),
-			TunnelRetransRate:    http.GetTunnelRetransRate(),
-			TunnelQueueBytes:     http.GetTunnelQueueBytes(),
-			TunnelBwEstimate:     http.GetTunnelBwEstimate(),
-			TunnelTargetRate:     http.GetTunnelTargetRate(),
-			TunnelFeedbackRTT:    http.GetTunnelFeedbackRTT(),
-			ServerSendRate:       http.GetServerSendRate(),
-			TunnelForwardRate:    http.GetTunnelForwardRate(),
-			TransportError:       http.GetLastTransportError(),
-			P1203Kbps:            kbps,
-			SegmentFileName:      segmentFileName,
-			SegmentRates:         segRates,
-			SumSegRate:           sumSegRate,
-			TotalStallDur:        totalStallDur,
-			NumStalls:            nStalls,
-			NumSwitches:          nSwitches,
-			RateDifference:       rateDifference,
-			SumRateChange:        sumRateChange,
-			RateChange:           rateChange,
-			MimeType:             mimeType,
-			Profile:              profile,
+			ArrivalTime:           arrivalTime,
+			DeliveryTime:          deliveryTime,
+			StallTime:             stallTime,
+			Bandwidth:             bandwithList[repRate],
+			DelRate:               thr,
+			ActRate:               (segSize * 8) / (segmentDuration * glob.Conversion1000),
+			SegSize:               segSize,
+			P1203HeaderSize:       P1203Header,
+			BufferLevel:           bufferLevel,
+			Adapt:                 adapt,
+			SegmentDuration:       segmentDuration,
+			ExtendPrintLog:        extendPrintLog,
+			RepCodec:              repCodec,
+			RepWidth:              repWidth,
+			RepHeight:             repHeight,
+			RepFps:                repFps,
+			PlayStartPosition:     segmentDurationTotal,
+			PlaybackTime:          playPosition,
+			Rtt:                   float64(rtt.Nanoseconds()) / (glob.Conversion1000 * glob.Conversion1000),
+			FileDownloadLocation:  fileDownloadLocation,
+			RepIndex:              repRate,
+			MpdIndex:              mpdListIndex,
+			AdaptIndex:            mimeTypes[mimeTypeIndex],
+			SegmentIndex:          nextSegmentNumber,
+			SegReplace:            hlsReplaced,
+			Played:                false,
+			HTTPprotocol:          protocol,
+			TransportMode:         http.GetActiveTransportMode(),
+			InnerProtocol:         strings.TrimSuffix(protocol, "+MASQUE"),
+			OuterProtocol:         http.GetOuterTransportProtocol(),
+			TunnelSetupMs:         http.GetTransportSetupTimeMillis(),
+			TunnelRetrans:         http.GetTunnelRetrans(),
+			TunnelRetransRate:     http.GetTunnelRetransRate(),
+			TunnelQueueBytes:      http.GetTunnelQueueBytes(),
+			TunnelBwEstimate:      http.GetTunnelBwEstimate(),
+			TunnelTargetRate:      http.GetTunnelTargetRate(),
+			TunnelFeedbackRTT:     http.GetTunnelFeedbackRTT(),
+			ServerSendRate:        http.GetServerSendRate(),
+			TunnelForwardRate:     http.GetTunnelForwardRate(),
+			RequestStartMs:        http.GetLastRequestStartMillisSince(startTime),
+			RequestToFirstByteMs:  http.GetLastRequestToFirstByteMillis(),
+			FirstByteToCompleteMs: http.GetLastFirstByteToCompleteMillis(),
+			RequestToCompleteMs:   http.GetLastRequestToCompleteMillis(),
+			TransportError:        http.GetLastTransportError(),
+			P1203Kbps:             kbps,
+			SegmentFileName:       segmentFileName,
+			SegmentRates:          segRates,
+			SumSegRate:            sumSegRate,
+			TotalStallDur:         totalStallDur,
+			NumStalls:             nStalls,
+			NumSwitches:           nSwitches,
+			RateDifference:        rateDifference,
+			SumRateChange:         sumRateChange,
+			RateChange:            rateChange,
+			MimeType:              mimeType,
+			Profile:               profile,
 		}
 
 		// this saves per segment number so from 1 on, and not 0 on
@@ -1422,6 +1451,25 @@ func streamLoop(streamStructs []http.StreamStruct, Noden P2Pconsul.NodeUrl, acco
 		case glob.EMWAAverageAlg:
 			//fmt.Println("old: ", repRate)
 			algo.EMWAAverageAlgo(&thrList, &repRate, exponentialRatio, 3, thr, bandwithList, lowestMPDrepRateIndex[mimeTypeIndex])
+
+		case glob.RobustMPCAlg:
+			if mimeType == glob.RepRateCodecAudio {
+				repRate = preRepRate
+				break
+			}
+			repRate = algo.RobustMPC(&RobustMPCDataStruct, thr, preRepRate, bufferLevel, segmentDuration*1000, segmentNumber, mpdList[mpdListIndex], mimeTypes[mimeTypeIndex], bandwithList, lowestMPDrepRateIndex[mimeTypeIndex])
+		case glob.BOLAAlg:
+			if mimeType == glob.RepRateCodecAudio {
+				repRate = preRepRate
+				break
+			}
+			repRate = algo.BOLA(bufferLevel, maxBufferLevel, segmentDuration*1000, segmentNumber, mpdList[mpdListIndex], mimeTypes[mimeTypeIndex], bandwithList, lowestMPDrepRateIndex[mimeTypeIndex])
+		case glob.BOLASSIMAlg:
+			if mimeType == glob.RepRateCodecAudio {
+				repRate = preRepRate
+				break
+			}
+			repRate = algo.BOLASSIM(bufferLevel, maxBufferLevel, segmentDuration*1000, segmentNumber, mpdList[mpdListIndex], mimeTypes[mimeTypeIndex], bandwithList, lowestMPDrepRateIndex[mimeTypeIndex], BOLASSIMDataProfile)
 
 		case glob.ArbiterAlg:
 

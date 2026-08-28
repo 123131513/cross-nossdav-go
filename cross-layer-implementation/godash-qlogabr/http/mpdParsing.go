@@ -284,8 +284,10 @@ func fileParser(mpdBody []byte) MPD {
 
 	for periodIndex := range mpd.Periods {
 		for adaptIndex := range mpd.Periods[periodIndex].AdaptationSet {
+			// GoDASH's ABR helpers and historical logs use representation index 0
+			// as the highest bitrate and the last index as the lowest bitrate.
 			sort.SliceStable(mpd.Periods[periodIndex].AdaptationSet[adaptIndex].Representation, func(i, j int) bool {
-				return mpd.Periods[periodIndex].AdaptationSet[adaptIndex].Representation[i].BandWidth < mpd.Periods[periodIndex].AdaptationSet[adaptIndex].Representation[j].BandWidth
+				return mpd.Periods[periodIndex].AdaptationSet[adaptIndex].Representation[i].BandWidth > mpd.Periods[periodIndex].AdaptationSet[adaptIndex].Representation[j].BandWidth
 			})
 		}
 	}

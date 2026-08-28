@@ -292,12 +292,19 @@ func calculateBBA2Reservoir(lowestBitrateChunkList []int, predictionTimePeriod_s
 		Message:   strconv.Itoa(int(sum_milli)),
 	}
 
-	// Clamp the reservoir between 3 * segmentsize and buffersize
-	if sum_milli < float32(3*segmentDuration_seconds*1000) {
-		sum_milli = float32(3 * segmentDuration_seconds * 1000)
+	// Clamp the lower reservoir without letting it consume the full buffer.
+	// With 2s chunks and a 5s max buffer, the original 3-chunk minimum becomes
+	// 6s and collapses the entire BBA cushion to the lowest representation.
+	reservoirCeiling := float32(0.6 * float64(buffersize_milli))
+	minReservoir := float32(3 * segmentDuration_seconds * 1000)
+	if minReservoir > reservoirCeiling {
+		minReservoir = reservoirCeiling
 	}
-	if sum_milli > float32(buffersize_milli) {
-		sum_milli = float32(buffersize_milli)
+	if sum_milli < minReservoir {
+		sum_milli = minReservoir
+	}
+	if sum_milli > reservoirCeiling {
+		sum_milli = reservoirCeiling
 	}
 
 	// Return in milliseconds

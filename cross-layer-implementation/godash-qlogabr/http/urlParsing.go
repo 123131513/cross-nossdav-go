@@ -67,6 +67,73 @@ var trQuic *http3.Transport
 
 var globAccountant *xlayer.CrossLayerAccountant = nil
 var activeBackend transport.Backend = transport.NewDirectBackend()
+var lastRequestTiming SegmentRequestTiming
+
+// SegmentRequestTiming records client-side timing for the last completed object request.
+type SegmentRequestTiming struct {
+	RequestStart        time.Time
+	RequestToFirstByte  time.Duration
+	FirstByteToComplete time.Duration
+	RequestToComplete   time.Duration
+}
+
+type requestTimingReadCloser struct {
+	body            io.ReadCloser
+	requestStart    time.Time
+	responseHeaders time.Time
+	firstByte       time.Time
+}
+
+func (r *requestTimingReadCloser) Read(p []byte) (int, error) {
+	n, err := r.body.Read(p)
+	if n > 0 && r.firstByte.IsZero() {
+		r.firstByte = time.Now()
+	}
+	return n, err
+}
+
+func (r *requestTimingReadCloser) Close() error {
+	return r.body.Close()
+}
+
+func (r *requestTimingReadCloser) Snapshot(complete time.Time) SegmentRequestTiming {
+	firstByte := r.firstByte
+	if firstByte.IsZero() {
+		firstByte = r.responseHeaders
+	}
+	return SegmentRequestTiming{
+		RequestStart:        r.requestStart,
+		RequestToFirstByte:  firstByte.Sub(r.requestStart),
+		FirstByteToComplete: complete.Sub(firstByte),
+		RequestToComplete:   complete.Sub(r.requestStart),
+	}
+}
+
+func millisString(value time.Duration) string {
+	if value < 0 {
+		return "-"
+	}
+	return fmt.Sprintf("%.3f", float64(value.Microseconds())/1000.0)
+}
+
+func GetLastRequestStartMillisSince(start time.Time) string {
+	if lastRequestTiming.RequestStart.IsZero() || start.IsZero() {
+		return "-"
+	}
+	return millisString(lastRequestTiming.RequestStart.Sub(start))
+}
+
+func GetLastRequestToFirstByteMillis() string {
+	return millisString(lastRequestTiming.RequestToFirstByte)
+}
+
+func GetLastFirstByteToCompleteMillis() string {
+	return millisString(lastRequestTiming.FirstByteToComplete)
+}
+
+func GetLastRequestToCompleteMillis() string {
+	return millisString(lastRequestTiming.RequestToComplete)
+}
 
 // Sets the globAccountant to the given accountant object
 func SetAccountant(acc *xlayer.CrossLayerAccountant) {
@@ -319,7 +386,7 @@ func getURLBody(url string, isByteRangeMPD bool, startRange int, endRange int, q
 	//fmt.Println("len : ", resp.ContentLength)
 
 	// return the response body
-	return resp.Body, rtt, protocol, contentLen, status
+	return &requestTimingReadCloser{body: resp.Body, requestStart: start, responseHeaders: end}, rtt, protocol, contentLen, status
 
 }
 
@@ -586,12 +653,18 @@ func GetFile(currentURL string, fileBaseURL string, fileLocation string, isByteR
 
 	//request the URL with GET
 	body, rtt, protocol, _, status := getURLBody(urlHeaderString, isByteRangeMPD, startRange, endRange, quicBool, debugFile, debugLog, useTestbedBool, false, ctx)
+	defer body.Close()
 
 	// read from the buffer
 	var buf bytes.Buffer
 	// duplicate the buffer incase I need it later
 	tee := io.TeeReader(body, &buf)
 	myBytes, _ := ioutil.ReadAll(tee)
+	if timedBody, ok := body.(*requestTimingReadCloser); ok {
+		lastRequestTiming = timedBody.Snapshot(time.Now())
+	} else {
+		lastRequestTiming = SegmentRequestTiming{}
+	}
 	// get the size of this segment
 	size := strconv.FormatInt(int64(len(myBytes)), 10)
 	segSize, err := strconv.Atoi(size)

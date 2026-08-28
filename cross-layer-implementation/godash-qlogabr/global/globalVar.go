@@ -91,6 +91,18 @@ const GeomAverageAlg = "geometric"
 // EMWAAverageAlg : constants for our algorithms
 const EMWAAverageAlg = "exponential"
 
+// RobustMPCAlg : constants for our algorithms
+const RobustMPCAlg = "robustmpc"
+
+// BOLAAlg : constants for our algorithms
+const BOLAAlg = "bola"
+
+// BOLASSIMAlg : BOLA-BASIC v1 using measured per-segment SSIMdB utility
+const BOLASSIMAlg = "bola-ssim"
+
+// BOLASSIMProfileName : parameter for the measured per-segment SSIM profile
+const BOLASSIMProfileName = "bolaSSIMProfile"
+
 // BBAAlg : test constants for our algorithms
 const BBAAlg = "bba"
 
@@ -378,6 +390,18 @@ const PlayHeader = "Play_Pos"
 
 // RttHeader : header for
 const RttHeader = "RTT"
+
+// RequestStartMsHeader : client request start relative to player start.
+const RequestStartMsHeader = "RequestStartMs"
+
+// RequestToFirstByteMsHeader : client request start to first response body byte.
+const RequestToFirstByteMsHeader = "RequestToFirstByteMs"
+
+// FirstByteToCompleteMsHeader : first response body byte to completed segment read.
+const FirstByteToCompleteMsHeader = "FirstByteToCompleteMs"
+
+// RequestToCompleteMsHeader : client request start to completed segment read.
+const RequestToCompleteMsHeader = "RequestToCompleteMs"
 
 // SegReplaceHeader : header for
 const SegReplaceHeader = "Seg_Repl"

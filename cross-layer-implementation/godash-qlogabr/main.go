@@ -38,6 +38,7 @@ import (
 
 	"github.com/quic-go/quic-go/qlog"
 	"github.com/uccmisl/godash/P2Pconsul"
+	algo "github.com/uccmisl/godash/algorithms"
 	glob "github.com/uccmisl/godash/global"
 	"github.com/uccmisl/godash/http"
 	"github.com/uccmisl/godash/logging"
@@ -95,7 +96,7 @@ var Noden = P2Pconsul.NodeUrl{}
 
 // slices for our encoders, algorithms and HLS
 var codecSlice = []string{glob.RepRateCodecAVC, glob.RepRateCodecHEVC, glob.RepRateCodecVP9, glob.RepRateCodecAV1}
-var algorithmSlice = []string{glob.ConventionalAlg, glob.ElasticAlg, glob.LogisticAlg, glob.TestAlg, glob.ProgressiveAlg, glob.MeanAverageAlg, glob.GeomAverageAlg, glob.EMWAAverageAlg, glob.ArbiterAlg, glob.BBAAlg, glob.MeanAverageXLAlg, glob.MeanAverageRecentXLAlg, glob.PensieveAlg, glob.PensieveXLAlg, glob.BBA1Alg_AV, glob.BBA1Alg_AVXL, glob.BBA2Alg_AV, glob.BBA2Alg_AVXL_base, glob.BBA2Alg_AVXL_double}
+var algorithmSlice = []string{glob.ConventionalAlg, glob.ElasticAlg, glob.LogisticAlg, glob.TestAlg, glob.ProgressiveAlg, glob.MeanAverageAlg, glob.GeomAverageAlg, glob.EMWAAverageAlg, glob.RobustMPCAlg, glob.BOLAAlg, glob.BOLASSIMAlg, glob.ArbiterAlg, glob.BBAAlg, glob.MeanAverageXLAlg, glob.MeanAverageRecentXLAlg, glob.PensieveAlg, glob.PensieveXLAlg, glob.BBA1Alg_AV, glob.BBA1Alg_AVXL, glob.BBA2Alg_AV, glob.BBA2Alg_AVXL_base, glob.BBA2Alg_AVXL_double}
 var hlsSlice = []string{glob.HlsOff, glob.HlsOn}
 var storeFilesSlice = []string{glob.StoreFilesOff, glob.StoreFilesOn}
 
@@ -136,7 +137,8 @@ func main() {
 	streamSpeedPtr := flag.Float64(glob.StreamSpeedName, 1, "multiplier for speed of stream")
 	maxBufferPtr := flag.Int(glob.MaxBufferName, 30, "maximum stream buffer in seconds")
 	initBufferPtr := flag.Int(glob.InitBufferName, 2, "initial number of segments to download before stream starts")
-	adaptPtr := flag.String(glob.AdaptName, glob.ConventionalAlg, "DASH algorithms - \""+glob.ConventionalAlg+"|"+glob.ElasticAlg+"|"+glob.ProgressiveAlg+"|"+glob.LogisticAlg+"|"+glob.MeanAverageAlg+"|"+glob.GeomAverageAlg+"|"+glob.EMWAAverageAlg+"|"+glob.ArbiterAlg+"|"+glob.PensieveAlg+"|"+glob.PensieveXLAlg+"|"+glob.BBA1Alg_AV+"|"+glob.BBA1Alg_AVXL+"|"+glob.BBA2Alg_AV+"|"+glob.BBA2Alg_AVXL_base+"|"+glob.BBA2Alg_AVXL_double+"\"")
+	adaptPtr := flag.String(glob.AdaptName, glob.ConventionalAlg, "DASH algorithms - \""+glob.ConventionalAlg+"|"+glob.ElasticAlg+"|"+glob.ProgressiveAlg+"|"+glob.LogisticAlg+"|"+glob.MeanAverageAlg+"|"+glob.GeomAverageAlg+"|"+glob.EMWAAverageAlg+"|"+glob.RobustMPCAlg+"|"+glob.BOLAAlg+"|"+glob.BOLASSIMAlg+"|"+glob.ArbiterAlg+"|"+glob.PensieveAlg+"|"+glob.PensieveXLAlg+"|"+glob.BBA1Alg_AV+"|"+glob.BBA1Alg_AVXL+"|"+glob.BBA2Alg_AV+"|"+glob.BBA2Alg_AVXL_base+"|"+glob.BBA2Alg_AVXL_double+"\"")
+	bolaSSIMProfilePtr := flag.String(glob.BOLASSIMProfileName, "", "JSON profile containing measured per-segment SSIM indices for bola-ssim")
 	pensieveServerPtr := flag.String(glob.PensieveServerName, "http://127.0.0.1:8333", "Pensieve external inference service endpoint - \"[http://host:port]\"")
 	storeFilesPtr := flag.String(glob.StoreFiles, glob.StoreFilesOff, "store the streamed DASH files, and associated files - \"["+glob.StoreFilesOn+"|"+glob.StoreFilesOff+"]\"")
 	fileStoreNamePtr := flag.String(glob.FileStoreName, "", "folder location within "+fileDownloadLocation+" to store the streamed DASH files - if no folder is passed, output defaults to \"../files\" folder")
@@ -600,6 +602,7 @@ func main() {
 	}
 
 	// check the adaptive algorithm argument
+	var bolaSSIMProfile *algo.BOLASSIMProfile
 	if utils.IsFlagSet(glob.AdaptName) || configSet {
 		// print value to debug log
 		logging.DebugPrint(glob.DebugFile, debugLog, "DEBUG: ", "-"+glob.AdaptName+" set to "+*adaptPtr)
@@ -633,6 +636,20 @@ func main() {
 				exponentialRatio = *expRatioPtr
 			}
 
+		}
+
+		if *adaptPtr == glob.BOLASSIMAlg {
+			profile, err := algo.LoadBOLASSIMProfile(*bolaSSIMProfilePtr)
+			if err != nil {
+				log.Fatal(err)
+			}
+			for _, mpd := range structList {
+				if err := profile.ValidateMPD(mpd); err != nil {
+					log.Fatalf("invalid BOLA SSIM profile for MPD: %v", err)
+				}
+			}
+			bolaSSIMProfile = profile
+			logging.DebugPrint(glob.DebugFile, debugLog, "DEBUG: ", "-"+glob.BOLASSIMProfileName+" set to "+*bolaSSIMProfilePtr)
 		}
 	} else {
 		//if there is no -adapt but -expRatio
@@ -905,7 +922,7 @@ func main() {
 
 	// its time to stream, call the algorithm file in player.go
 	player.Stream(structList, glob.DebugFile, debugLog, *codecPtr, glob.CodecName, *maxHeightPtr,
-		*streamDurationPtr, *streamSpeedPtr, *maxBufferPtr, *initBufferPtr, *adaptPtr, *pensieveServerPtr, *urlPtr, fileDownloadLocation, extendPrintLog, *hlsPtr, hlsBool, *quicPtr, quicBool, getHeaderBool, *getHeaderPtr, exponentialRatio, printHeadersData, printLog, useTestbedBool, getQoEBool, saveFilesBool, Noden, accountant)
+		*streamDurationPtr, *streamSpeedPtr, *maxBufferPtr, *initBufferPtr, *adaptPtr, *pensieveServerPtr, bolaSSIMProfile, *urlPtr, fileDownloadLocation, extendPrintLog, *hlsPtr, hlsBool, *quicPtr, quicBool, getHeaderBool, *getHeaderPtr, exponentialRatio, printHeadersData, printLog, useTestbedBool, getQoEBool, saveFilesBool, Noden, accountant)
 
 	// ending consul
 	if *collabPrintPtr == glob.CollabPrintOn {

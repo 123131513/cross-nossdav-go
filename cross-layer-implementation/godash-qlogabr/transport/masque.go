@@ -19,7 +19,7 @@ const masqueInnerInitialPacketSize = 800
 
 const (
 	masqueOuterHandshakeTimeout = 3 * time.Second
-	masqueConnectUDPTimeout     = 5 * time.Second
+	masqueConnectUDPTimeout     = 120 * time.Second
 )
 
 type MasqueBackend struct {

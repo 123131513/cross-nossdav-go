@@ -3,7 +3,6 @@ package algorithms
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,12 +15,11 @@ import (
 const pensieveServiceTimeout = 2 * time.Second
 const pensieveOfficialResetPath = "/reset"
 
-var pensieveOfficialBitratesKbps = []int{300, 750, 1200, 1850, 2850, 4300}
-
 type PensieveExternalClient struct {
 	ServerURL         string
 	HTTPClient        *http.Client
 	TotalRebufferTime int
+	ExpectedActions   int
 }
 
 type pensievePredictionRequest struct {
@@ -32,6 +30,13 @@ type pensievePredictionRequest struct {
 	LastChunkStartTime  int     `json:"lastChunkStartTime"`
 	LastChunkSize       int     `json:"lastChunkSize"`
 	LastRequest         int     `json:"lastRequest"`
+}
+
+type pensieveServiceMetadata struct {
+	ActionDim            int   `json:"action_dim"`
+	BitratesBpsAscending []int `json:"bitrates_bps_ascending"`
+	StateHistoryLen      int   `json:"state_history_len"`
+	TotalVideoChunks     int   `json:"total_video_chunks"`
 }
 
 func NewPensieveExternalClient(serverURL string) *PensieveExternalClient {
@@ -67,6 +72,70 @@ func (c *PensieveExternalClient) Reset() error {
 	return nil
 }
 
+// ValidateLadder checks a metadata-aware Pensieve service against the runtime MPD.
+// Legacy six-action upstream services have no metadata endpoint and remain
+// supported only for six-representation MPDs.
+func (c *PensieveExternalClient) ValidateLadder(bandwithList []int) error {
+	if len(bandwithList) < 2 {
+		return fmt.Errorf("pensieve external model requires at least 2 representations, got %d", len(bandwithList))
+	}
+	req, err := http.NewRequest(http.MethodGet, c.ServerURL+"/metadata", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("query pensieve metadata: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read pensieve metadata: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		if len(bandwithList) == 6 {
+			c.ExpectedActions = 6
+			return nil
+		}
+		return fmt.Errorf("pensieve service has no usable metadata for %d-action MPD: HTTP %d", len(bandwithList), resp.StatusCode)
+	}
+	var metadata pensieveServiceMetadata
+	if err := json.Unmarshal(body, &metadata); err != nil {
+		if len(bandwithList) == 6 {
+			c.ExpectedActions = 6
+			return nil
+		}
+		return fmt.Errorf("pensieve service returned invalid metadata for %d-action MPD: %w", len(bandwithList), err)
+	}
+	if metadata.ActionDim != len(bandwithList) {
+		return fmt.Errorf("pensieve service action_dim %d does not match MPD representations %d", metadata.ActionDim, len(bandwithList))
+	}
+	if metadata.StateHistoryLen > 0 && metadata.StateHistoryLen < metadata.ActionDim {
+		return fmt.Errorf("pensieve service state_history_len %d is smaller than action_dim %d", metadata.StateHistoryLen, metadata.ActionDim)
+	}
+	if len(metadata.BitratesBpsAscending) > 0 {
+		localAscending := make([]int, len(bandwithList))
+		for quality, localIndex := range sortedRepIndicesAscending(bandwithList) {
+			localAscending[quality] = bandwithList[localIndex]
+		}
+		if len(metadata.BitratesBpsAscending) != len(localAscending) {
+			return fmt.Errorf("pensieve metadata bitrate count %d does not match MPD count %d", len(metadata.BitratesBpsAscending), len(localAscending))
+		}
+		for quality := range localAscending {
+			if metadata.BitratesBpsAscending[quality] != localAscending[quality] {
+				return fmt.Errorf(
+					"pensieve metadata bitrate at quality %d is %d, MPD has %d",
+					quality,
+					metadata.BitratesBpsAscending[quality],
+					localAscending[quality],
+				)
+			}
+		}
+	}
+	c.ExpectedActions = metadata.ActionDim
+	return nil
+}
+
 func (c *PensieveExternalClient) SelectBitrate(
 	bandwithList []int,
 	currentRepRate int,
@@ -76,11 +145,11 @@ func (c *PensieveExternalClient) SelectBitrate(
 	deliveryTimeMs int,
 	lastRequestNumber int,
 ) (int, error) {
-	if len(bandwithList) != 6 {
-		return 0, errors.New("pensieve external model requires exactly 6 representations to match the official action space")
+	if len(bandwithList) < 2 {
+		return 0, fmt.Errorf("pensieve external model requires at least 2 representations, got %d", len(bandwithList))
 	}
-	if err := validatePensieveOfficialBitrateLadder(bandwithList); err != nil {
-		return 0, err
+	if c.ExpectedActions > 0 && len(bandwithList) != c.ExpectedActions {
+		return 0, fmt.Errorf("pensieve external model expects %d representations, got %d", c.ExpectedActions, len(bandwithList))
 	}
 
 	if stallTimeMs > 0 {
@@ -163,22 +232,4 @@ func localRepToServiceQuality(ascendingLocalIndices []int, localRepRate int) (in
 		}
 	}
 	return 0, fmt.Errorf("local representation index %d not found in Pensieve quality mapping", localRepRate)
-}
-
-func validatePensieveOfficialBitrateLadder(bandwithList []int) error {
-	ascendingLocalIndices := sortedRepIndicesAscending(bandwithList)
-	for i, localIdx := range ascendingLocalIndices {
-		if bandwithList[localIdx]/1000 != pensieveOfficialBitratesKbps[i] {
-			return fmt.Errorf("pensieve official rl_server expects bitrate ladder %v Kbps, got %v Kbps", pensieveOfficialBitratesKbps, bitratesToKbpsAscending(bandwithList, ascendingLocalIndices))
-		}
-	}
-	return nil
-}
-
-func bitratesToKbpsAscending(bandwithList []int, ascendingLocalIndices []int) []int {
-	kbps := make([]int, len(ascendingLocalIndices))
-	for i, localIdx := range ascendingLocalIndices {
-		kbps[i] = bandwithList[localIdx] / 1000
-	}
-	return kbps
 }
